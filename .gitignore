@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.kubeconfig
+kubeconfig*
+
+# Benchmark output (traces, scores, recorded LLM responses)
+runs/
+results/
+recordings/
+*.log
+
+# Local tool state
+.claude/settings.local.json
+.code-review-graph/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
