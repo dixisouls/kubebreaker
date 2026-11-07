@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+httpx
+redis
+psycopg[binary]
+psycopg-pool
+prometheus-client

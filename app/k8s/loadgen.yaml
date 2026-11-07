@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: kubebreaker/shop:0.1.0
+          imagePullPolicy: IfNotPresent
+          command: [python, -m, shop.loadgen]
+          env:
+            - name: TARGET_URL
+              value: http://frontend
+            - name: INTERVAL_SECONDS
+              value: "0.5"
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
