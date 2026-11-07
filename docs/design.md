@@ -34,6 +34,27 @@ Timeouts are kept short and predictable (frontend → api 3s, api → orders 3s,
 
 `make app-reset` force-deletes the pods and the namespace, reapplies the manifests and runs `scripts/verify-baseline.sh`: all Deployments available, every Service has ready endpoints, the frontend renders orders. It takes about 15–20s.
 
+## Fault catalog
+
+Code: `src/kubebreaker/chaos/faults.py`. Each fault defines `inject`, `symptom` (true once the break is visible), an `alert` for the agent that never names the cause, a `ground_truth`, an `expected_fix`, and a `reference_fix` that `kubebreaker selftest` uses to prove the fault can be fixed.
+
+A fault counts as fixed when the whole app matches its baseline: every Deployment has its replicas and a finished rollout, every Service has ready endpoints, and the frontend renders orders. Some faults add their own checks on top (for example, `wrong-db-host` also requires `DB_HOST=postgres`).
+
+| Fault | Tier | Injection | Alert the agent gets |
+| --- | --- | --- | --- |
+| bad-command | easy | api command loads `shop.gateway:app` | KubePodCrashLooping on api |
+| bad-image-tag | easy | frontend image `kubebreaker/shop:0.2.0` | KubeDeploymentRolloutStuck on frontend |
+| scaled-to-zero | easy | api replicas 0 | HighErrorRate on frontend |
+| wrong-db-host | medium | `orders-config` DB_HOST `postgres-primary`, orders restarted | HighErrorRate on frontend |
+| oom-killed | medium | orders memory limit 24Mi | KubePodCrashLooping on orders |
+| broken-selector | medium | orders Service selector `app=order` | HighErrorRate on frontend |
+| failing-readiness | medium | frontend readiness path `/ready` | KubeDeploymentRolloutStuck on frontend |
+| missing-secret-ref | medium | orders env references Secret `orders-db-credentials` | KubeDeploymentRolloutStuck on orders |
+
+Faults that change a pod template cause a **partial outage**: the rolling update keeps the old pods serving while the new ones fail, as it would in production. The health check still counts them as broken, because the rollout never finishes.
+
+`missing-secret-ref` replaces the original "delete the Secret" idea. A deleted Secret holds a password the agent has no way to recover, while a wrong reference can be found and fixed from what the cluster shows.
+
 ## Runtime layout
 
 - `kind` and `kubectl` run on the host. kind is never run inside a container.

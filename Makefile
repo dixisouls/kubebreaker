@@ -5,7 +5,7 @@ CALICO_URL     := https://raw.githubusercontent.com/projectcalico/calico/$(CALIC
 KUBECTL        := kubectl --context $(CONTEXT)
 APP_IMAGE      := kubebreaker/shop:0.1.0
 
-.PHONY: help cluster-up cluster-down cni monitoring status prometheus app-build app-load app-reset app-verify shop require-context
+.PHONY: help cluster-up cluster-down cni monitoring status prometheus app-build app-load app-reset app-verify shop test selftest require-context
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -53,6 +53,12 @@ app-verify: require-context ## Check the shop app matches its baseline
 
 shop: require-context ## Port-forward the shop frontend to localhost:8080
 	$(KUBECTL) -n shop port-forward svc/frontend 8080:80
+
+test: ## Run unit tests (no cluster needed)
+	uv run pytest -m "not cluster"
+
+selftest: require-context ## Inject every fault, apply its reference fix, verify recovery
+	uv run kubebreaker selftest
 
 require-context:
 	@scripts/require-context.sh

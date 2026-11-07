@@ -61,6 +61,16 @@ make app-reset      # put the shop app back to its healthy baseline (~20s)
 make cluster-down   # delete everything
 ```
 
+Break things and check recovery:
+
+```sh
+uv sync                                  # install the kubebreaker CLI
+uv run kubebreaker faults                # list the fault catalog
+uv run kubebreaker inject wrong-db-host  # reset, inject, wait for the symptom, print the alert
+uv run kubebreaker verify wrong-db-host  # is the app back to baseline?
+uv run kubebreaker selftest              # every fault: inject, reference fix, verify
+```
+
 Run `make help` for all targets. Tested with kind v0.33.0 (Kubernetes v1.37.0) and Calico v3.33.0.
 
 ## Safety
