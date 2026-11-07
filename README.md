@@ -50,6 +50,17 @@ kubebreaker breaks a local Kubernetes cluster in a known way, lets an LLM agent 
 
 Don't enable the built-in Kubernetes in Docker Desktop or OrbStack. kubebreaker uses only its own kind cluster.
 
+## Quickstart
+
+```sh
+make cluster-up     # kind cluster (1 control plane + 1 worker), Calico, Prometheus, kube-state-metrics
+make status         # nodes and pods
+make prometheus     # Prometheus UI at http://localhost:9090
+make cluster-down   # delete everything
+```
+
+Run `make help` for all targets. Tested with kind v0.33.0 (Kubernetes v1.37.0) and Calico v3.33.0.
+
 ## Safety
 
 The agent never gets a shell. It works through structured tools, under a ServiceAccount whose RBAC is limited to the app namespace (plus the CoreDNS ConfigMap), pinned to the `kind-kubebreaker` context. Destructive operations are blocked, and every change is dry-run on the server and logged as a diff before it's applied.
