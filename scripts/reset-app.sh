@@ -17,6 +17,8 @@ k delete namespace shop --ignore-not-found --wait=true --timeout=120s >/dev/null
 
 echo "applying baseline manifests..."
 k apply -k "$ROOT/app/k8s" >/dev/null
+# The agent's RoleBinding lives in shop, so it goes away with the namespace
+k apply -f "$ROOT/cluster/agent/rbac.yaml" >/dev/null
 
 for d in postgres redis orders api frontend loadgen; do
   k -n shop rollout status "deployment/$d" --timeout=120s >/dev/null

@@ -23,6 +23,8 @@ class Kube:
 
     context: str = DEFAULT_CONTEXT
     namespace: str = APP_NAMESPACE
+    # Defaults to the kubeconfig user for `context`; the agent passes its ServiceAccount client
+    api_client: client.ApiClient | None = None
 
     def __post_init__(self):
         if not self.context.startswith("kind-"):
@@ -30,7 +32,8 @@ class Kube:
         contexts, _ = config.list_kube_config_contexts()
         if self.context not in {c["name"] for c in contexts}:
             raise WrongClusterError(f"kube context {self.context!r} not found; run make cluster-up")
-        self._api_client = config.new_client_from_config(context=self.context)
+        if self.api_client is None:
+            self.api_client = config.new_client_from_config(context=self.context)
 
     @classmethod
     def from_env(cls) -> "Kube":
@@ -38,15 +41,15 @@ class Kube:
 
     @cached_property
     def core(self) -> client.CoreV1Api:
-        return client.CoreV1Api(self._api_client)
+        return client.CoreV1Api(self.api_client)
 
     @cached_property
     def apps(self) -> client.AppsV1Api:
-        return client.AppsV1Api(self._api_client)
+        return client.AppsV1Api(self.api_client)
 
     @cached_property
     def discovery(self) -> client.DiscoveryV1Api:
-        return client.DiscoveryV1Api(self._api_client)
+        return client.DiscoveryV1Api(self.api_client)
 
     # --- helpers shared by faults and checks ---
 

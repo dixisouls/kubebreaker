@@ -1,0 +1,119 @@
+# Identity the SRE agent's tools run as. Applied by scripts/reset-app.sh, because the
+# RoleBinding in `shop` disappears whenever the namespace is reset.
+#
+# The agent can read and change the shop app, read CoreDNS and patch its ConfigMap,
+# and query Prometheus. It can't touch RBAC, namespaces, nodes, or anything else.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubebreaker
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sre-agent
+  namespace: kubebreaker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubebreaker-sre-agent-app
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, endpoints, configmaps, secrets, events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
+  - apiGroups: [""]
+    resources: [services, configmaps]
+    verbs: [patch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, deployments/scale]
+    verbs: [patch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, patch, delete]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-agent
+  namespace: shop
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubebreaker-sre-agent-app
+subjects:
+  - kind: ServiceAccount
+    name: sre-agent
+    namespace: kubebreaker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sre-agent-coredns
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [coredns]
+    verbs: [get, patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [coredns]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-agent-coredns
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sre-agent-coredns
+subjects:
+  - kind: ServiceAccount
+    name: sre-agent
+    namespace: kubebreaker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sre-agent-prometheus
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: [services/proxy]
+    resourceNames: [prometheus, "prometheus:9090"]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-agent-prometheus
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sre-agent-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: sre-agent
+    namespace: kubebreaker
