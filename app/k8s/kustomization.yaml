@@ -1,0 +1,15 @@
+# The baseline shop app. Apply with: kubectl apply -k app/k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: shop
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: shop
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - redis.yaml
+  - orders.yaml
+  - api.yaml
+  - frontend.yaml
+  - loadgen.yaml

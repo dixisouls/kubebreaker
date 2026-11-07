@@ -9,6 +9,31 @@
 5. **Agent harness:** a hand-written tool-calling loop over a provider-agnostic `LLMClient`, with step and token caps and a full trace logger.
 6. **Scorer and dashboard:** health checks, collateral diff, root-cause judge, results page.
 
+## Target app
+
+Namespace `shop`, manifests in `app/k8s`, one Python image (`kubebreaker/shop`) for all services:
+
+```
+loadgen ──► frontend ──► api ──► orders ──► postgres
+                          │
+                          └──► redis (cache, no fallback)
+```
+
+| Service | Replicas | Notes |
+| --- | --- | --- |
+| frontend | 2 | HTML page from `api`; 502 when `api` fails |
+| api | 2 | Caches the order list in Redis for 5s; fails if Redis fails (cascading failure) |
+| orders | 2 | Postgres via `orders-config` ConfigMap (host) and `postgres-credentials` Secret |
+| postgres | 1 | emptyDir storage, seeded by `postgres-init` |
+| redis | 1 | No persistence |
+| loadgen | 1 | ~2 req/s against the frontend, 10% writes; logs ok/failed counts every 30s |
+
+Every HTTP service exposes `http_requests_total`, `http_request_duration_seconds` and `dependency_request_duration_seconds` (labelled by dependency and outcome) on `/metrics`.
+
+Timeouts are kept short and predictable (frontend → api 3s, api → orders 3s, Redis 2s with one retry), so a fault shows up within seconds and with the same timing on every run.
+
+`make app-reset` force-deletes the pods and the namespace, reapplies the manifests and runs `scripts/verify-baseline.sh`: all Deployments available, every Service has ready endpoints, the frontend renders orders. It takes about 15–20s.
+
 ## Runtime layout
 
 - `kind` and `kubectl` run on the host. kind is never run inside a container.

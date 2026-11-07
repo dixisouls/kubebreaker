@@ -53,9 +53,11 @@ Don't enable the built-in Kubernetes in Docker Desktop or OrbStack. kubebreaker 
 ## Quickstart
 
 ```sh
-make cluster-up     # kind cluster (1 control plane + 1 worker), Calico, Prometheus, kube-state-metrics
+make cluster-up     # kind cluster, Calico, Prometheus, kube-state-metrics and the shop app
 make status         # nodes and pods
+make shop           # shop frontend at http://localhost:8080
 make prometheus     # Prometheus UI at http://localhost:9090
+make app-reset      # put the shop app back to its healthy baseline (~20s)
 make cluster-down   # delete everything
 ```
 
