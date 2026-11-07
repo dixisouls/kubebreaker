@@ -18,7 +18,7 @@ kubebreaker breaks a local Kubernetes cluster in a known way, lets an LLM agent 
 ## What gets measured
 
 | Metric | Measured by |
-|---|---|
+| --- | --- |
 | Resolve rate | The fault's verify check passes after the agent finishes |
 | Time to resolve | Wall clock from alert to passing health check |
 | Steps | Number of tool calls |
@@ -57,7 +57,7 @@ The agent never gets a shell. It works through structured tools, under a Service
 ## Roadmap
 
 | Phase | Milestone |
-|---|---|
+| --- | --- |
 | 1 | kind + Calico cluster, target app, Prometheus, reliable reset to baseline |
 | 2 | Chaos injector with easy and medium faults |
 | 3 | Agent harness, LLM adapters, safety layer, trace logging |
@@ -69,3 +69,7 @@ See [docs/design.md](docs/design.md) for the full design.
 ## Related work
 
 [AIOpsLab](https://github.com/microsoft/AIOpsLab) (Microsoft) and [ITBench](https://github.com/IBM/ITBench) (IBM) are larger benchmarks in this space. kubebreaker aims to be laptop-sized and cheap to run, and to score fix quality and collateral damage, not just whether the alert went away.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
