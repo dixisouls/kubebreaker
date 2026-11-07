@@ -78,11 +78,12 @@ class AnthropicClient:
         self._client = Anthropic(max_retries=3)
 
     def chat(self, system: str, messages: list[Message], tools: list[ToolSpec]) -> LLMResponse:
+        kwargs = {"tools": to_tools(tools)} if tools else {}
         resp = self._client.messages.create(
             model=self.model,
             system=[{"type": "text", "text": system, "cache_control": CACHE}],
             messages=to_messages(messages),
-            tools=to_tools(tools),
             max_tokens=self.max_output_tokens,
+            **kwargs,
         )
         return from_response(resp)

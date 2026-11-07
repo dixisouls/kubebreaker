@@ -13,6 +13,9 @@ from kubebreaker.agent.trace import Trace
 from kubebreaker.chaos import Fault, runner
 from kubebreaker.kube import Kube
 from kubebreaker.llm import LLMClient
+from kubebreaker.scoring.judge import judge_root_cause
+from kubebreaker.scoring.score import score_fix
+from kubebreaker.scoring.snapshot import take_snapshot
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 # After the agent stops, give the cluster a little time to settle before judging
@@ -41,6 +44,19 @@ class EpisodeResult:
     ground_truth: str
     remaining_problems: list[str] = field(default_factory=list)
     mutations: list[dict] = field(default_factory=list)
+    # Scores
+    fix_quality: float = 0.0
+    fix_label: str = "unresolved"
+    band_aids: list[str] = field(default_factory=list)
+    collateral: list[str] = field(default_factory=list)
+    fix_changes: list[str] = field(default_factory=list)
+    disruptive_actions: list[str] = field(default_factory=list)
+    root_cause_verdict: str = ""
+    root_cause_score: float = 0.0
+    root_cause_reason: str = ""
+    judge: str = ""
+    # True when the judge's provider also ran the agent: results may be biased
+    judge_same_provider: bool = False
     error: str = ""
     run_dir: str = ""
 
@@ -63,6 +79,7 @@ def run_episode(
 
     trace.log("reset")
     runner.reset_app(admin)
+    baseline = take_snapshot(admin)
     symptom_s = runner.inject(admin, fault)
     trace.log("injected", fault=fault.id, symptom_seconds=round(symptom_s, 1))
 
@@ -74,6 +91,17 @@ def run_episode(
     resolved = not remaining
     ttr = round(time.monotonic() - alert_at, 1) if resolved else None
     trace.log("verified", resolved=resolved, remaining=remaining)
+
+    mutations = [asdict(m) for m in tools.mutations]
+    fix = score_fix(fault, resolved, baseline, take_snapshot(admin), mutations)
+    trace.log("fix_score", **asdict(fix))
+    try:
+        judgement = judge_root_cause(fault.ground_truth, outcome.root_cause, outcome.fix_summary)
+    except Exception as exc:
+        judgement = None
+        trace.log("judge_error", error=f"{type(exc).__name__}: {exc}")
+    if judgement:
+        trace.log("root_cause_judged", **asdict(judgement))
 
     result = EpisodeResult(
         fault_id=fault.id,
@@ -94,7 +122,18 @@ def run_episode(
         fix_summary=outcome.fix_summary,
         ground_truth=fault.ground_truth,
         remaining_problems=remaining,
-        mutations=[asdict(m) for m in tools.mutations],
+        mutations=mutations,
+        fix_quality=fix.quality,
+        fix_label=fix.label,
+        band_aids=fix.band_aids,
+        collateral=fix.collateral,
+        fix_changes=fix.fix_changes,
+        disruptive_actions=fix.disruptive_actions,
+        root_cause_verdict=judgement.verdict if judgement else "judge_error",
+        root_cause_score=judgement.score if judgement else 0.0,
+        root_cause_reason=judgement.reason if judgement else "",
+        judge=judgement.judge if judgement else "",
+        judge_same_provider=bool(judgement) and judgement.judge.split("/")[0] == llm.provider,
         error=outcome.error,
         run_dir=str(run_dir),
     )

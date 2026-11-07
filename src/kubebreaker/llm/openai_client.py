@@ -97,11 +97,12 @@ class OpenAIClient:
         kwargs = {}
         if self.reasoning_effort:
             kwargs["reasoning"] = {"effort": self.reasoning_effort}
+        if tools:
+            kwargs["tools"] = to_tools(tools)
         resp = self._client.responses.create(
             model=self.model,
             instructions=system,
             input=to_input(messages),
-            tools=to_tools(tools),
             max_output_tokens=self.max_output_tokens,
             # Stateless: we send the full history each turn, including encrypted reasoning
             store=False,

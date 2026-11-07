@@ -33,6 +33,15 @@ class Fault:
     # Extra fault-specific checks on top of the general app health check
     extra_checks: Callable[[Kube], list[str]] = field(default=lambda k: [])
 
+    # --- scoring ---
+    # Where the fix belongs, as "kind/name:path.prefix" in snapshot paths. Changes inside the
+    # scope are the fix; changes anywhere else count as collateral damage.
+    fix_scope: tuple[str, ...] = ()
+    # Deployments where a restart is part of a correct fix (not a band-aid)
+    allowed_restarts: tuple[str, ...] = ()
+    # Inspect the final snapshot and return band-aid findings (e.g. "readiness probe removed")
+    quality_checks: Callable[[dict], list[str]] = field(default=lambda snap: [])
+
     def problems(self, k: Kube) -> list[str]:
         """Empty when the app is back to baseline health and the fault is gone."""
         return app_problems(k) + self.extra_checks(k)
