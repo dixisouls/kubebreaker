@@ -2,6 +2,9 @@
 
 import argparse
 import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from kubebreaker.chaos import CATALOG, runner
 from kubebreaker.kube import Kube
@@ -71,7 +74,31 @@ def cmd_selftest(args) -> int:
     return 1 if failed else 0
 
 
+def cmd_run(args) -> int:
+    from kubebreaker.episode import run_episode
+    from kubebreaker.llm import make_client
+
+    fault = _fault(args.fault)
+    llm = make_client(args.provider, args.model)
+    print(f"episode: {fault.id} with {llm.provider}/{llm.model} (max {args.max_steps} steps)")
+    r = run_episode(Kube.from_env(), fault, llm, args.max_steps, args.max_tokens)
+    verdict = "RESOLVED" if r.resolved else "NOT RESOLVED"
+    ttr = f"{r.time_to_resolve_seconds:.0f}s" if r.time_to_resolve_seconds else "-"
+    print(f"\n{verdict}  steps={r.steps}  time={ttr}  stop={r.stop_reason}")
+    print(f"tokens: in={r.input_tokens} (cached {r.cached_tokens}) out={r.output_tokens}")
+    print(f"agent's root cause: {r.root_cause or '-'}")
+    print(f"agent's fix:        {r.fix_summary or '-'}")
+    print(f"ground truth:       {r.ground_truth}")
+    for p in r.remaining_problems:
+        print(f"  remaining: {p}")
+    if r.error:
+        print(f"error: {r.error}")
+    print(f"trace: {r.run_dir}/trace.jsonl")
+    return 0 if r.resolved else 1
+
+
 def main() -> None:
+    load_dotenv(Path.cwd() / ".env")
     parser = argparse.ArgumentParser(prog="kubebreaker")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -91,6 +118,14 @@ def main() -> None:
     p = sub.add_parser("selftest", help="inject each fault, apply its reference fix, verify")
     p.add_argument("faults", nargs="*", help="fault ids (default: all)")
     p.set_defaults(func=cmd_selftest)
+
+    p = sub.add_parser("run", help="run one agent episode against a fault")
+    p.add_argument("fault")
+    p.add_argument("--provider", help="openai or anthropic (default: LLM_PROVIDER)")
+    p.add_argument("--model", help="model name (default: LLM_MODEL)")
+    p.add_argument("--max-steps", type=int, default=20)
+    p.add_argument("--max-tokens", type=int, default=600_000)
+    p.set_defaults(func=cmd_run)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

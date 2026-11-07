@@ -86,9 +86,21 @@ class LLMClient(Protocol):
 
 Each tool is defined once as a JSON schema. The adapters translate tool schemas, tool results, system prompts, argument encoding and usage fields for each provider. Provider and model are recorded in every trace. The root-cause judge should use a different provider from the agent.
 
+## Agent harness
+
+Code: `src/kubebreaker/llm/` (provider adapters) and `src/kubebreaker/agent/` (tools, loop, identity, trace).
+
+- **OpenAI** uses the Responses API, because newer models only support function tools there. Calls are stateless (`store=False`), and encrypted reasoning items are passed back each turn.
+- **Anthropic** uses the Messages API, with prompt caching on the system prompt, the tools and the latest turn.
+- Each assistant turn keeps its provider-native output (`Message.raw`) so it can be sent back unchanged. If the history is replayed to a different provider, the adapter rebuilds it from the neutral fields instead.
+- The loop stops on `declare_resolved`, the step cap (tool calls), the token cap, an LLM error, or 3 turns in a row without tool calls. Each tool response ends with a budget note (`[budget: 12 of 20 tool calls used]`), with a warning when 5 or fewer remain.
+- The agent's Kubernetes client authenticates as the `kubebreaker/sre-agent` ServiceAccount with a short-lived token (`cluster/agent/rbac.yaml`), never as the kubeconfig admin.
+
 ## Agent tools
 
-`get_resources`, `describe`, `get_logs`, `get_events`, `query_metrics`, `apply_patch`, `rollout` (restart and undo), `declare_resolved(root_cause, fix_summary)`.
+`get_resources`, `describe`, `get_logs`, `get_events`, `query_metrics`, `apply_patch` (strategic merge), `rollout` (status, restart, undo), `delete` (pods and NetworkPolicies only), `declare_resolved(root_cause, fix_summary)`.
+
+Allowed namespaces are `shop` and `kube-system`; RBAC is the final guard. Secret values are always redacted. Output is trimmed to 6,000 characters (head and tail kept).
 
 The agent writes its current hypothesis before every action.
 
