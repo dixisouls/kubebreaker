@@ -155,3 +155,62 @@ def test_judge_skips_llm_when_no_root_cause():
     j = FakeJudge("unused")
     out = judge_root_cause("truth", "  ", "", llm=j)
     assert out.score == 0.0 and out.judge == "none" and not j.prompts
+
+
+def test_redis_memory_band_aids():
+    from kubebreaker.chaos.quality import redis_memory_check
+
+    def snap(args):
+        return {"deployment/redis": {f"{C}[redis].args": args}}
+
+    assert (
+        redis_memory_check(snap(["--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"])) == []
+    )
+    assert redis_memory_check(snap(["--save", ""])) == []  # no cap at all is fine
+    assert (
+        len(redis_memory_check(snap(["--maxmemory", "1mb", "--maxmemory-policy", "noeviction"])))
+        == 2
+    )
+    found = redis_memory_check(snap(["--maxmemory", "1mb", "--maxmemory-policy", "allkeys-lru"]))
+    assert found == ["redis maxmemory 1mb is still too small for the cache"]
+
+
+def test_cpu_limit_band_aid():
+    from kubebreaker.chaos.quality import cpu_limit_check
+
+    def snap(limit):
+        fields = {} if limit is None else {f"{C}[redis].resources.limits.cpu": limit}
+        return {"deployment/redis": fields}
+
+    assert cpu_limit_check(snap(None), "redis") == []
+    assert cpu_limit_check(snap("500m"), "redis") == []
+    assert cpu_limit_check(snap("1"), "redis") == []
+    assert cpu_limit_check(snap("10m"), "redis") == ["redis CPU limit 10m is still below 50m"]
+
+
+def test_corefile_collateral_counts_only_extra_edits():
+    from kubebreaker.chaos.faults_hard import COREFILE, FILTER_LINE, corefile_collateral
+
+    base_text = (
+        "kubernetes cluster.local {\n   pods insecure\n}\ncache 30 {\n   disable success\n}\n"
+    )
+    base = {COREFILE: {"data.Corefile": base_text}}
+    restored = {COREFILE: {"data.Corefile": base_text}}
+    assert corefile_collateral(restored, base) == []
+    still_broken = {
+        COREFILE: {
+            "data.Corefile": base_text.replace(
+                "   pods insecure\n", "   pods insecure\n" + FILTER_LINE
+            )
+        }
+    }
+    assert corefile_collateral(still_broken, base) == []  # not collateral; verify catches it
+    rewritten = {
+        COREFILE: {
+            "data.Corefile": base_text.replace("cache 30 {\n   disable success\n}\n", "cache 30\n")
+        }
+    }
+    notes = corefile_collateral(rewritten, base)
+    assert len(notes) == 1 and "cache 30" in notes[0]
+    s = score_fix(CATALOG["dns-namespace-filter"], True, base, rewritten, [])
+    assert s.quality == 0.85 and s.label == "acceptable"

@@ -41,6 +41,9 @@ class Fault:
     allowed_restarts: tuple[str, ...] = ()
     # Inspect the final snapshot and return band-aid findings (e.g. "readiness probe removed")
     quality_checks: Callable[[dict], list[str]] = field(default=lambda snap: [])
+    # Compare final and baseline snapshots for collateral changes that fix_scope can't express,
+    # e.g. extra edits inside the same file the fix belongs in
+    collateral_checks: Callable[[dict, dict], list[str]] = field(default=lambda final, base: [])
 
     def problems(self, k: Kube) -> list[str]:
         """Empty when the app is back to baseline health and the fault is gone."""

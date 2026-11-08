@@ -1,5 +1,6 @@
 """Kubernetes access pinned to the kubebreaker kind cluster."""
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -74,6 +75,32 @@ class Kube:
         dep = self.apps.read_namespaced_deployment(name, self.namespace)
         selector = ",".join(f"{k}={v}" for k, v in dep.spec.selector.match_labels.items())
         return self.core.list_namespaced_pod(self.namespace, label_selector=selector).items
+
+    def prom_query(self, promql: str) -> list[dict]:
+        """Instant PromQL query through the API server's service proxy. Returns the result list."""
+        request = self.api_client.param_serialize(
+            "GET",
+            "/api/v1/namespaces/monitoring/services/prometheus:9090/proxy/api/v1/query",
+            query_params=[("query", promql)],
+            auth_settings=["BearerToken"],
+        )
+        resp = self.api_client.call_api(*request, _request_timeout=15)
+        resp.read()
+        body = json.loads(resp.data)
+        if body.get("status") != "success":
+            raise RuntimeError(f"prometheus: {body.get('error')}")
+        return body["data"]["result"]
+
+    def prom_value(self, promql: str) -> float | None:
+        """A single-value query; None when there's no data or the value isn't a number."""
+        result = self.prom_query(promql)
+        if not result:
+            return None
+        try:
+            value = float(result[0]["value"][1])
+        except (KeyError, ValueError):
+            return None
+        return None if value != value else value  # NaN means no traffic in the window
 
     def frontend_page(self) -> str | None:
         """GET the frontend through the API server proxy. Returns the body, or None on error."""

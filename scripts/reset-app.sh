@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Put the shop app back to its baseline: delete the namespace (which removes any injected
-# NetworkPolicies, patched ConfigMaps, deleted Secrets and so on), reapply, verify.
+# Put the shop app back to its baseline: restore cluster DNS, delete the namespace (which
+# removes any injected NetworkPolicies, patched ConfigMaps, deleted Secrets and so on),
+# reapply, verify.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,6 +11,8 @@ k() { kubectl --context "$CONTEXT" "$@"; }
 "$ROOT/scripts/require-context.sh"
 
 start=$SECONDS
+"$ROOT/scripts/restore-coredns.sh"
+
 echo "deleting namespace shop..."
 # Pods hold no state worth a graceful shutdown, so skip the grace period
 k -n shop delete pods --all --grace-period=0 --force --ignore-not-found >/dev/null 2>&1 || true

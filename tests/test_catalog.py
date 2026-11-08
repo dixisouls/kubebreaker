@@ -15,6 +15,10 @@ GIVEAWAYS = {
     "broken-selector": ["selector", "app=order", "endpoint"],
     "failing-readiness": ["/ready", "probe", "readiness"],
     "missing-secret-ref": ["secret", "orders-db-credentials", "CreateContainerConfigError"],
+    "netpol-block": ["network", "policy", "orders", "timeout"],
+    "dns-namespace-filter": ["dns", "coredns", "resolve", "postgres", "namespace"],
+    "redis-oom": ["redis", "memory", "oom", "cache"],
+    "cpu-starvation": ["cpu", "redis", "throttl", "limit"],
 }
 
 
@@ -40,6 +44,6 @@ def test_fault_is_complete(fault_id):
         assert callable(fn)
 
 
-def test_catalog_covers_easy_and_medium():
+def test_catalog_covers_all_tiers():
     tiers = {f.tier for f in CATALOG.values()}
-    assert {Tier.EASY, Tier.MEDIUM} <= tiers
+    assert tiers == {Tier.EASY, Tier.MEDIUM, Tier.HARD}
