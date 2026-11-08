@@ -102,6 +102,8 @@ def cmd_run(args) -> int:
     ):
         for item in items:
             print(f"  {label}: {item}")
+    if r.fallback_turns:
+        print(f"note: {r.fallback_turns} turn(s) served by a fallback model: {r.served_by}")
     if r.error:
         print(f"error: {r.error}")
     print(f"trace: {r.run_dir}/trace.jsonl")

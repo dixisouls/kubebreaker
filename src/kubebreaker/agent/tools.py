@@ -137,9 +137,10 @@ def _str(description: str, enum: list[str] | None = None) -> dict:
     return schema
 
 
-HYPOTHESIS = _str(
-    "Your current hypothesis about the root cause, and what this call will confirm or rule out."
-)
+# A short stated purpose per call keeps traces readable. Asking the model to narrate its
+# reasoning here instead ("your current hypothesis...") trips Anthropic's
+# reasoning_extraction safeguard on Claude Sonnet 5.5.
+PURPOSE = _str("One short sentence: what this call checks or changes, and why.")
 NAMESPACE = _str("Namespace (default shop).", NAMESPACES)
 
 
@@ -149,8 +150,8 @@ def _spec(name: str, description: str, props: dict, required: list[str]) -> Tool
         description,
         {
             "type": "object",
-            "properties": {"hypothesis": HYPOTHESIS, **props},
-            "required": ["hypothesis", *required],
+            "properties": {"purpose": PURPOSE, **props},
+            "required": ["purpose", *required],
             "additionalProperties": False,
         },
     )
@@ -300,7 +301,7 @@ class AgentTools:
         handler = self._handlers.get(name)
         if not handler:
             return f"error: unknown tool {name!r}"
-        args = {k: v for k, v in args.items() if k != "hypothesis"}
+        args = {k: v for k, v in args.items() if k != "purpose"}
         try:
             return truncate(handler(args))
         except ToolError as exc:

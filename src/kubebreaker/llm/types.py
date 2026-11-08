@@ -44,7 +44,9 @@ class Usage:
 
 @dataclass
 class Message:
-    role: Literal["user", "assistant", "tool"]
+    # "system" is a harness notice sent mid-conversation (e.g. a step-budget warning), kept
+    # separate from tool results so the model doesn't mistake it for tool output
+    role: Literal["user", "assistant", "tool", "system"]
     text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
@@ -54,7 +56,7 @@ class Message:
     raw_provider: str | None = None
 
 
-Stop = Literal["tool_use", "end", "max_tokens"]
+Stop = Literal["tool_use", "end", "max_tokens", "refusal"]
 
 
 @dataclass
@@ -62,6 +64,10 @@ class LLMResponse:
     message: Message
     usage: Usage
     stop: Stop
+    # The model that actually produced this turn; differs from the requested model when a
+    # provider-side fallback took over
+    served_by: str | None = None
+    fallback: bool = False
 
 
 class LLMClient(Protocol):

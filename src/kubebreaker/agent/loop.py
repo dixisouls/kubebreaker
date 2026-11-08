@@ -13,9 +13,8 @@ Find the root cause and fix it, using only the tools you have.
 
 How to work:
 - Observe first: look at what's failing before changing anything.
-- Every tool call takes a `hypothesis`: write your current best guess about the root cause
-  and what the call will confirm or rule out.
-- Test hypotheses with targeted reads (resources, describe, logs, events, metrics).
+- Every tool call takes a short `purpose`: what the call checks or changes, and why.
+- Narrow down the cause with targeted reads (resources, describe, logs, events, metrics).
 - Fix the actual cause with the smallest correct change. Avoid band-aids such as restarting
   or deleting pods repeatedly, removing resource limits, or changing unrelated objects.
 - After a change, verify the app is healthy again (rollouts complete, endpoints ready,
@@ -47,6 +46,9 @@ class AgentOutcome:
     stop_reason: str = ""
     error: str = ""
     seconds: float = 0.0
+    # Turns a provider-side fallback model produced instead of the requested one
+    fallback_turns: int = 0
+    served_by: list[str] = field(default_factory=list)
 
 
 def alert_message(alert: str, max_steps: int) -> str:
@@ -56,12 +58,20 @@ def alert_message(alert: str, max_steps: int) -> str:
     )
 
 
-def budget_note(used: int, max_steps: int) -> str:
+def budget_notice(used: int, max_steps: int, sent: set[str]) -> str | None:
+    """A step-budget notice at two milestones, each sent once: halfway, and when 5 or fewer
+    calls remain. Sent as a separate system message, never inside a tool result."""
     left = max_steps - used
-    note = f"[budget: {used} of {max_steps} tool calls used]"
-    if 0 < left <= 5:
-        note += f" Only {left} left: finish verifying and call declare_resolved."
-    return note
+    if 0 < left <= 5 and "final" not in sent:
+        sent.add("final")
+        return (
+            f"Step budget: {used} of {max_steps} tool calls used, {left} left. "
+            "Finish verifying and call declare_resolved."
+        )
+    if used * 2 >= max_steps and left > 5 and "half" not in sent:
+        sent.add("half")
+        return f"Step budget: {used} of {max_steps} tool calls used."
+    return None
 
 
 def run_agent(
@@ -78,6 +88,7 @@ def run_agent(
     messages = [Message("user", alert_message(alert, max_steps))]
     trace.log("alert", alert=alert, provider=llm.provider, model=llm.model)
     idle_turns = 0
+    notices_sent: set[str] = set()
 
     while True:
         if out.steps >= max_steps:
@@ -95,15 +106,23 @@ def run_agent(
             break
         out.turns += 1
         out.usage = out.usage + resp.usage
-        messages.append(resp.message)
+        out.fallback_turns += resp.fallback
+        if resp.served_by and resp.served_by not in out.served_by:
+            out.served_by.append(resp.served_by)
         trace.log(
             "llm",
             turn=out.turns,
             text=resp.message.text,
             stop=resp.stop,
             usage=resp.usage,
+            served_by=resp.served_by,
+            fallback=resp.fallback,
             tool_calls=[{"id": c.id, "name": c.name} for c in resp.message.tool_calls],
         )
+        if resp.stop == "refusal":
+            out.stop_reason = "refusal"
+            break
+        messages.append(resp.message)
 
         if not resp.message.tool_calls:
             idle_turns += 1
@@ -130,18 +149,17 @@ def run_agent(
                 "tool",
                 step=out.steps,
                 name=call.name,
-                hypothesis=call.args.get("hypothesis", ""),
-                args={k: v for k, v in call.args.items() if k != "hypothesis"},
+                purpose=call.args.get("purpose", ""),
+                args={k: v for k, v in call.args.items() if k != "purpose"},
                 output=output,
                 seconds=round(time.monotonic() - t0, 3),
             )
             results.append(ToolResult(call.id, output))
-        if results and not out.declared:
-            last = results[-1]
-            results[-1] = ToolResult(
-                last.call_id, f"{last.output}\n\n{budget_note(out.steps, max_steps)}"
-            )
         messages.append(Message("tool", tool_results=results))
+        notice = None if out.declared else budget_notice(out.steps, max_steps, notices_sent)
+        if notice:
+            messages.append(Message("system", notice))
+            trace.log("notice", text=notice)
 
         if out.declared:
             out.stop_reason = "declared"

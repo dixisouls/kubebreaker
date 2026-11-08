@@ -58,7 +58,9 @@ def judge_root_cause(
     if not root_cause.strip():
         return Judgement("wrong", 0.0, "the agent gave no root cause", "none")
     llm = llm or make_client(
-        os.environ.get("JUDGE_PROVIDER") or None, os.environ.get("JUDGE_MODEL") or None
+        os.environ.get("JUDGE_PROVIDER") or None,
+        os.environ.get("JUDGE_MODEL") or None,
+        effort="low",  # a short grading task
     )
     resp = llm.chat(
         JUDGE_PROMPT, [Message("user", judge_prompt(ground_truth, root_cause, fix_summary))], []

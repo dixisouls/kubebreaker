@@ -126,6 +126,7 @@ def test_anthropic_response_parsing_counts_cache_tokens_as_input():
             FakeItem(type="tool_use", id="t1", name="get_events", input={"namespace": "shop"}),
         ],
         stop_reason="tool_use",
+        model="claude-sonnet-5-5",
         usage=NS(
             input_tokens=10,
             output_tokens=5,
@@ -138,3 +139,48 @@ def test_anthropic_response_parsing_counts_cache_tokens_as_input():
     assert r.message.text == "looking"
     assert r.message.tool_calls == [ToolCall("t1", "get_events", {"namespace": "shop"})]
     assert (r.usage.input_tokens, r.usage.cached_tokens) == (360, 300)
+
+
+def test_anthropic_system_notice_becomes_a_system_message():
+    msgs = anth.to_messages([*HISTORY, Message("system", "budget note")])
+    assert msgs[-1] == {"role": "system", "content": "budget note"}
+    # the cache marker still lands on the last block-list message (the tool results)
+    assert msgs[-2]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_openai_system_notice_becomes_a_developer_message():
+    assert oai.to_input([Message("system", "note")]) == [{"role": "developer", "content": "note"}]
+
+
+def test_anthropic_refusal_discards_partial_content():
+    resp = NS(
+        content=[FakeItem(type="tool_use", id="t1", name="delete", input={})],
+        stop_reason="refusal",
+        model="claude-sonnet-5-5",
+        usage=NS(input_tokens=10, output_tokens=1),
+    )
+    r = anth.from_response(resp)
+    assert r.stop == "refusal" and r.message.tool_calls == [] and r.message.raw == []
+
+
+def test_anthropic_fallback_is_detected_and_its_marker_dropped():
+    resp = NS(
+        content=[
+            FakeItem(type="fallback"),
+            FakeItem(type="text", text="continuing"),
+        ],
+        stop_reason="end_turn",
+        model="claude-sonnet-5",
+        usage=NS(
+            input_tokens=20,
+            output_tokens=8,
+            iterations=[
+                NS(type="message", input_tokens=100, output_tokens=0),
+                NS(type="fallback_message", input_tokens=20, output_tokens=8),
+            ],
+        ),
+    )
+    r = anth.from_response(resp)
+    assert r.fallback and r.served_by == "claude-sonnet-5"
+    assert [b["type"] for b in r.message.raw] == ["text"]
+    assert (r.usage.input_tokens, r.usage.output_tokens) == (120, 8)  # both attempts counted
