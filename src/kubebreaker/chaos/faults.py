@@ -8,6 +8,7 @@ from kubernetes import client
 
 from kubebreaker.chaos.base import Fault, Tier, register
 from kubebreaker.chaos.checks import frontend_problems, has_unready_running_pod, pod_waiting_reasons
+from kubebreaker.chaos.quality import memory_limit_check, probe_kept_check, replicas_check
 from kubebreaker.kube import Kube
 
 GOOD_IMAGE = "kubebreaker/shop:0.1.0"
@@ -49,6 +50,10 @@ register(
                 "api", command=["uvicorn", "shop.api:app", "--host", "0.0.0.0", "--port", "8080"]
             ),
         ),
+        fix_scope=(
+            "deployment/api:spec.template.spec.containers[api].command",
+            "deployment/api:spec.template.spec.containers[api].args",
+        ),
     )
 )
 
@@ -72,6 +77,7 @@ register(
         reference_fix=lambda k: k.patch_deployment(
             "frontend", container_patch("frontend", image=GOOD_IMAGE)
         ),
+        fix_scope=("deployment/frontend:spec.template.spec.containers[frontend].image",),
     )
 )
 
@@ -92,6 +98,8 @@ register(
         reference_fix=lambda k: k.apps.patch_namespaced_deployment_scale(
             "api", k.namespace, {"spec": {"replicas": 2}}
         ),
+        fix_scope=("deployment/api:spec.replicas",),
+        quality_checks=lambda snap: replicas_check(snap, "api", 2),
     )
 )
 
@@ -125,6 +133,8 @@ register(
             == "postgres"
             else ["orders-config DB_HOST is not 'postgres'"]
         ),
+        fix_scope=("configmap/orders-config:data.DB_HOST",),
+        allowed_restarts=("orders",),
     )
 )
 
@@ -154,6 +164,8 @@ register(
                 resources={"requests": {"memory": "64Mi"}, "limits": {"memory": "256Mi"}},
             ),
         ),
+        fix_scope=("deployment/orders:spec.template.spec.containers[orders].resources",),
+        quality_checks=lambda snap: memory_limit_check(snap, "orders"),
     )
 )
 
@@ -175,6 +187,7 @@ register(
         reference_fix=lambda k: k.core.patch_namespaced_service(
             "orders", k.namespace, {"spec": {"selector": {"app": "orders"}}}
         ),
+        fix_scope=("service/orders:spec.selector",),
     )
 )
 
@@ -202,6 +215,8 @@ register(
                 "frontend", readinessProbe={"httpGet": {"path": "/readyz", "port": 8080}}
             ),
         ),
+        fix_scope=("deployment/frontend:spec.template.spec.containers[frontend].readinessProbe",),
+        quality_checks=lambda snap: probe_kept_check(snap, "frontend", "readinessProbe"),
     )
 )
 
@@ -233,5 +248,6 @@ register(
         inject=lambda k: _set_orders_secret(k, "orders-db-credentials"),
         symptom=lambda k: "CreateContainerConfigError" in pod_waiting_reasons(k, "orders"),
         reference_fix=lambda k: _set_orders_secret(k, "postgres-credentials"),
+        fix_scope=("deployment/orders:spec.template.spec.containers[orders].env",),
     )
 )

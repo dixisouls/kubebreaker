@@ -115,6 +115,26 @@ The agent writes its current hypothesis before every action.
 
 Reset works at the namespace level (delete and reapply the app manifests, restore CoreDNS from a saved copy), not by recreating the cluster. The reset is verified against the baseline before every injection.
 
+## Scoring
+
+Code: `src/kubebreaker/scoring/`. Every episode writes these to `result.json`; `kubebreaker results` prints them as a table.
+
+**Snapshots.** Before injecting, the episode snapshots the state we own: Deployments, Services, ConfigMaps, Secrets (values hashed) and NetworkPolicies in `shop`, plus the CoreDNS ConfigMap. Only spec, labels and data are kept, flattened to paths like `deployment/orders:spec.template.spec.containers[orders].resources.limits.memory`. Lists of named items are keyed by name. Cluster-assigned fields, status, and the `restartedAt` annotation are left out, so an untouched cluster snapshots identically every time (there's a test for this).
+
+**Collateral damage.** The final snapshot is diffed against the baseline. Each fault declares a `fix_scope` (the paths where the fix belongs); any difference outside it is collateral. There's a cluster test that each fault's injection lands inside its scope, and that its reference fix scores 1.0.
+
+**Fix quality.** A resolved incident starts at 1.0:
+
+| Finding | Penalty | Examples |
+| --- | --- | --- |
+| Band-aid | -0.4 each | readiness probe removed, memory limit removed or still too low, replicas below baseline |
+| Collateral change | -0.15 each | changing a Deployment the fault didn't touch |
+| Unneeded disruption | -0.05 each | deleting pods, restarting a Deployment the fix doesn't require |
+
+Labels: clean (>= 0.9), acceptable (>= 0.6), band-aid (below). Unresolved scores 0. Band-aid detectors live in `chaos/quality.py` and are attached per fault (`quality_checks`).
+
+**Root-cause accuracy.** A judge model (`JUDGE_PROVIDER`, `JUDGE_MODEL`) compares the agent's `root_cause` with the fault's `ground_truth` and returns correct (1.0), partial (0.5) or wrong (0). No root cause scores 0 without calling the judge. When the judge's provider also ran the agent, `judge_same_provider` is set so results can be filtered or caveated.
+
 ## Scoring notes
 
 - The collateral diff compares only fields we own (spec, labels, data) and ignores `status`, `resourceVersion`, timestamps and controller-managed annotations.

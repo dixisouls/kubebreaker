@@ -91,10 +91,54 @@ def cmd_run(args) -> int:
     print(f"ground truth:       {r.ground_truth}")
     for p in r.remaining_problems:
         print(f"  remaining: {p}")
+    print(f"\nroot cause: {r.root_cause_verdict} ({r.root_cause_score})  {r.root_cause_reason}")
+    if r.judge_same_provider:
+        print("  note: judged by the same provider that ran the agent")
+    print(f"fix quality: {r.fix_label} ({r.fix_quality})")
+    for label, items in (
+        ("band-aid", r.band_aids),
+        ("collateral", r.collateral),
+        ("disruptive", r.disruptive_actions),
+    ):
+        for item in items:
+            print(f"  {label}: {item}")
     if r.error:
         print(f"error: {r.error}")
     print(f"trace: {r.run_dir}/trace.jsonl")
     return 0 if r.resolved else 1
+
+
+def cmd_results(args) -> int:
+    import json
+
+    files = sorted(Path(args.runs_dir).glob("*/result.json"))
+    if not files:
+        print(f"no results in {args.runs_dir}")
+        return 1
+    rows = [json.loads(f.read_text()) for f in files]
+    header = ["RUN", "FAULT", "MODEL", "RESOLVED", "ROOT CAUSE", "FIX", "STEPS", "TOKENS", "TTR"]
+    lines = [header]
+    for r in rows:
+        ttr = r.get("time_to_resolve_seconds")
+        lines.append(
+            [
+                Path(r["run_dir"]).name[:15],
+                r["fault_id"],
+                r["model"],
+                "yes" if r["resolved"] else "no",
+                r.get("root_cause_verdict", "-") or "-",
+                f"{r.get('fix_label', '-')} {r.get('fix_quality', 0):.2f}",
+                str(r["steps"]),
+                f"{(r['input_tokens'] + r['output_tokens']) / 1000:.0f}k",
+                f"{ttr:.0f}s" if ttr else "-",
+            ]
+        )
+    widths = [max(len(line[i]) for line in lines) for i in range(len(header))]
+    for line in lines:
+        print("  ".join(c.ljust(w) for c, w in zip(line, widths, strict=True)).rstrip())
+    resolved = sum(r["resolved"] for r in rows)
+    print(f"\n{resolved}/{len(rows)} resolved")
+    return 0
 
 
 def main() -> None:
@@ -126,6 +170,10 @@ def main() -> None:
     p.add_argument("--max-steps", type=int, default=20)
     p.add_argument("--max-tokens", type=int, default=600_000)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("results", help="summarize episode results")
+    p.add_argument("runs_dir", nargs="?", default="runs")
+    p.set_defaults(func=cmd_results)
 
     args = parser.parse_args()
     sys.exit(args.func(args))
