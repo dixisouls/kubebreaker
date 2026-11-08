@@ -33,7 +33,7 @@ class RecordingTools:
 
 
 def call(i, tool, **args):
-    return ToolCall(f"c{i}", tool, {"hypothesis": f"h{i}", **args})
+    return ToolCall(f"c{i}", tool, {"purpose": f"p{i}", **args})
 
 
 def test_runs_tools_until_declared():
@@ -61,12 +61,11 @@ def test_runs_tools_until_declared():
     assert out.steps == 3 and out.turns == 3
     assert out.usage.input_tokens == 300
     assert [c[0] for c in tools.calls] == ["get_resources", "apply_patch"]
-    hypotheses = [e["hypothesis"] for e in trace.events if e["kind"] == "tool"]
-    assert hypotheses == ["h1", "h2"]
+    purposes = [e["purpose"] for e in trace.events if e["kind"] == "tool"]
+    assert purposes == ["p1", "p2"]
     # The tool result for call 1 was sent back on the next turn
     last = llm.seen[1][-1]
-    assert last.role == "tool" and last.tool_results[0].output.startswith("ok:get_resources")
-    assert "[budget: 1 of 20 tool calls used]" in last.tool_results[0].output
+    assert last.role == "tool" and last.tool_results[0].output == "ok:get_resources"
 
 
 def test_stops_at_step_cap():
@@ -97,10 +96,10 @@ def test_llm_error_ends_episode_cleanly():
     assert out.stop_reason == "llm_error" and "rate limited" in out.error
 
 
-def test_every_tool_except_final_requires_a_hypothesis():
+def test_every_tool_except_final_requires_a_purpose():
     for spec in SPECS:
         required = spec.parameters["required"]
-        assert ("hypothesis" in required) == (spec.name != "declare_resolved"), spec.name
+        assert ("purpose" in required) == (spec.name != "declare_resolved"), spec.name
 
 
 def test_secret_values_are_redacted():
@@ -124,8 +123,50 @@ def test_truncate_keeps_head_and_tail():
     assert out.startswith("A" * 500) and out.endswith("B" * 500) and "trimmed" in out
 
 
-def test_budget_warning_near_the_cap():
-    from kubebreaker.agent.loop import budget_note
+def test_budget_notices_are_separate_system_messages_sent_once():
+    from kubebreaker.agent.loop import budget_notice
 
-    assert "Only" not in budget_note(10, 20)
-    assert "Only 3 left" in budget_note(17, 20)
+    sent: set[str] = set()
+    assert budget_notice(3, 20, sent) is None
+    assert "10 of 20" in budget_notice(10, 20, sent)
+    assert budget_notice(12, 20, sent) is None  # halfway notice only once
+    assert "3 left" in budget_notice(17, 20, sent)
+    assert budget_notice(18, 20, sent) is None  # final notice only once
+
+
+def test_notices_never_go_inside_tool_results():
+    llm = ScriptedLLM([[call(i, "get_events")] for i in range(50)])
+    run_agent(llm, RecordingTools(), "alert", Trace(None), max_steps=20)
+    history = llm.seen[-1]
+    assert all(
+        r.output == "ok:get_events" for m in history if m.role == "tool" for r in m.tool_results
+    )
+    notices = [m.text for m in history if m.role == "system"]
+    assert len(notices) == 2 and "left" in notices[1]
+    # each notice directly follows a tool-results turn
+    for i, m in enumerate(history):
+        if m.role == "system":
+            assert history[i - 1].role == "tool"
+
+
+def test_refusal_stops_without_appending_the_turn():
+    class Refuses(ScriptedLLM):
+        def chat(self, system, messages, tools):
+            self.seen.append(list(messages))
+            return LLMResponse(Message("assistant"), Usage(5, 0), "refusal", "m-1")
+
+    llm = Refuses([])
+    out = run_agent(llm, RecordingTools(), "alert", Trace(None))
+    assert out.stop_reason == "refusal" and out.turns == 1
+
+
+def test_fallback_turns_are_counted():
+    class FallsBack(ScriptedLLM):
+        def chat(self, system, messages, tools):
+            resp = super().chat(system, messages, tools)
+            resp.served_by, resp.fallback = "other-model", True
+            return resp
+
+    llm = FallsBack([[call(1, "get_events")], [ToolCall("c2", "declare_resolved", {})]])
+    out = run_agent(llm, RecordingTools(), "alert", Trace(None))
+    assert out.fallback_turns == 2 and out.served_by == ["other-model"]

@@ -20,6 +20,9 @@ def to_input(messages: list[Message]) -> list[dict]:
     for m in messages:
         if m.role == "user":
             items.append({"role": "user", "content": m.text or ""})
+        elif m.role == "system":
+            # Harness notices go in as developer messages, separate from tool output
+            items.append({"role": "developer", "content": m.text or ""})
         elif m.role == "assistant":
             if m.raw is not None and m.raw_provider == PROVIDER:
                 items.extend(m.raw)

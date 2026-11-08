@@ -91,9 +91,10 @@ Each tool is defined once as a JSON schema. The adapters translate tool schemas,
 Code: `src/kubebreaker/llm/` (provider adapters) and `src/kubebreaker/agent/` (tools, loop, identity, trace).
 
 - **OpenAI** uses the Responses API, because newer models only support function tools there. Calls are stateless (`store=False`), and encrypted reasoning items are passed back each turn.
-- **Anthropic** uses the Messages API, with prompt caching on the system prompt, the tools and the latest turn.
+- **Anthropic** uses the Messages API (beta namespace, for server-side fallback), with prompt caching on the system prompt, the tools and the latest turn. Thinking stays at the model default (adaptive) and depth is set with `output_config.effort` (default `medium`, override with `LLM_REASONING_EFFORT`). `max_tokens` defaults to 16,000 because thinking counts toward it. Assistant turns are replayed exactly as returned, thinking blocks included, and the history is append-only, so Claude's preserved-thinking checks pass.
+- **Refusals** (`stop_reason: "refusal"`) end the episode with `stop_reason: refusal`; partial content is discarded. Anthropic server-side fallback (`fallbacks: "default"`) is on unless `LLM_FALLBACKS=off`; turns served by a fallback model are counted in `fallback_turns` and listed in `served_by`, so those runs can be excluded from per-model results.
 - Each assistant turn keeps its provider-native output (`Message.raw`) so it can be sent back unchanged. If the history is replayed to a different provider, the adapter rebuilds it from the neutral fields instead.
-- The loop stops on `declare_resolved`, the step cap (tool calls), the token cap, an LLM error, or 3 turns in a row without tool calls. Each tool response ends with a budget note (`[budget: 12 of 20 tool calls used]`), with a warning when 5 or fewer remain.
+- The loop stops on `declare_resolved`, the step cap (tool calls), the token cap, an LLM error, or 3 turns in a row without tool calls. Budget notices are sent as separate mid-conversation system messages (OpenAI: developer messages), never inside tool results, at two points: halfway, and when 5 or fewer calls remain. Claude Sonnet 5.5 can read harness text inside tool results on every step as a prompt injection.
 - The agent's Kubernetes client authenticates as the `kubebreaker/sre-agent` ServiceAccount with a short-lived token (`cluster/agent/rbac.yaml`), never as the kubeconfig admin.
 
 ## Agent tools
@@ -102,7 +103,7 @@ Code: `src/kubebreaker/llm/` (provider adapters) and `src/kubebreaker/agent/` (t
 
 Allowed namespaces are `shop` and `kube-system`; RBAC is the final guard. Secret values are always redacted. Output is trimmed to 6,000 characters (head and tail kept).
 
-The agent writes its current hypothesis before every action.
+Every tool call carries a one-sentence `purpose` (what it checks or changes, and why), so traces read like an investigation log. An earlier version asked for the agent's "current hypothesis" on every call; Claude Sonnet 5.5's `reasoning_extraction` safeguard refused those requests outright, so the field asks for a purpose instead.
 
 ## Safety
 

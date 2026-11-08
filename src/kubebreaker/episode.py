@@ -57,6 +57,9 @@ class EpisodeResult:
     judge: str = ""
     # True when the judge's provider also ran the agent: results may be biased
     judge_same_provider: bool = False
+    # Turns produced by a provider-side fallback model; exclude such runs from per-model stats
+    fallback_turns: int = 0
+    served_by: list[str] = field(default_factory=list)
     error: str = ""
     run_dir: str = ""
 
@@ -134,6 +137,8 @@ def run_episode(
         root_cause_reason=judgement.reason if judgement else "",
         judge=judgement.judge if judgement else "",
         judge_same_provider=bool(judgement) and judgement.judge.split("/")[0] == llm.provider,
+        fallback_turns=outcome.fallback_turns,
+        served_by=outcome.served_by,
         error=outcome.error,
         run_dir=str(run_dir),
     )

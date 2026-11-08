@@ -78,7 +78,7 @@ cp .env.example .env                     # then set LLM_PROVIDER, LLM_MODEL and 
 uv run kubebreaker run wrong-db-host     # reset, inject, alert the agent, verify, save the trace
 ```
 
-Each run writes `runs/<time>-<fault>/trace.jsonl` (every LLM turn and tool call, with the agent's hypothesis) and `result.json` (resolved, steps, tokens, time, root cause, every change the agent made).
+Each run writes `runs/<time>-<fault>/trace.jsonl` (every LLM turn and tool call, with the agent's stated purpose) and `result.json` (resolved, steps, tokens, time, root cause, every change the agent made).
 
 Run `make help` for all targets. Tested with kind v0.33.0 (Kubernetes v1.37.0) and Calico v3.33.0.
 
