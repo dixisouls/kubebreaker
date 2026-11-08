@@ -51,6 +51,19 @@ A fault counts as fixed when the whole app matches its baseline: every Deploymen
 | failing-readiness | medium | frontend readiness path `/ready` | KubeDeploymentRolloutStuck on frontend |
 | missing-secret-ref | medium | orders env references Secret `orders-db-credentials` | KubeDeploymentRolloutStuck on orders |
 
+**Hard tier** (`src/kubebreaker/chaos/faults_hard.py`): the symptom appears somewhere other than the cause.
+
+| Fault | Injection | What the agent sees first |
+| --- | --- | --- |
+| netpol-block | NetworkPolicy `orders-allow-frontend` admits only app=frontend to orders | Frontend 5xx; api logs orders `ConnectTimeout`; every pod healthy |
+| dns-namespace-filter | CoreDNS `kubernetes` plugin gets `namespaces kube-system`; CoreDNS and orders restarted | orders can't resolve `postgres` although its ConfigMap is right |
+| redis-oom | redis args `--maxmemory 1mb --maxmemory-policy noeviction` | Frontend 5xx; api logs Redis `OutOfMemoryError`; Redis pod healthy |
+| cpu-starvation | redis CPU limit and request 1m | Frontend p95 ~20ms → 140-340ms, no errors; Redis heavily throttled |
+
+`cpu-starvation` is the only fault where the app looks healthy by the usual checks, so its verification also requires frontend p95 latency (30s window) back under 60ms.
+
+The reset restores CoreDNS too (`scripts/restore-coredns.sh`): the first run saves the Corefile as `kubebreaker/coredns-baseline`, a namespace the agent can't read, and every reset puts it back and restarts CoreDNS if it changed.
+
 Faults that change a pod template cause a **partial outage**: the rolling update keeps the old pods serving while the new ones fail, as it would in production. The health check still counts them as broken, because the rollout never finishes.
 
 `missing-secret-ref` replaces the original "delete the Secret" idea. A deleted Secret holds a password the agent has no way to recover, while a wrong reference can be found and fixed from what the cluster shows.

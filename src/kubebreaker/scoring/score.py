@@ -56,12 +56,13 @@ def score_fix(
 ) -> FixScore:
     fix, collateral = split(diff(baseline, final), fault.fix_scope)
     band_aids = fault.quality_checks(final)
+    collateral_notes = [str(c) for c in collateral] + fault.collateral_checks(final, baseline)
     actions = disruptive_actions(fault, mutations)
     result = FixScore(
         quality=0.0,
         label="unresolved",
         band_aids=band_aids,
-        collateral=[str(c) for c in collateral],
+        collateral=collateral_notes,
         fix_changes=[str(c) for c in fix],
         disruptive_actions=actions,
     )
@@ -69,7 +70,7 @@ def score_fix(
         return result
     quality = 1.0
     quality -= BAND_AID_PENALTY * len(band_aids)
-    quality -= COLLATERAL_PENALTY * len(collateral)
+    quality -= COLLATERAL_PENALTY * len(collateral_notes)
     quality -= DISRUPTION_PENALTY * len(actions)
     result.quality = round(max(0.0, quality), 2)
     result.label = label_for(result.quality)

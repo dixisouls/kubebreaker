@@ -19,7 +19,7 @@ from kubebreaker.scoring.snapshot import take_snapshot
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 # After the agent stops, give the cluster a little time to settle before judging
-SETTLE_SECONDS = 60
+SETTLE_SECONDS = 90
 
 
 @dataclass
@@ -96,7 +96,12 @@ def run_episode(
     trace.log("verified", resolved=resolved, remaining=remaining)
 
     mutations = [asdict(m) for m in tools.mutations]
-    fix = score_fix(fault, resolved, baseline, take_snapshot(admin), mutations)
+    final = take_snapshot(admin)
+    # Kept so the episode can be re-scored later without re-running it
+    (run_dir / "snapshots.json").write_text(
+        json.dumps({"baseline": baseline, "final": final}, indent=1, default=str)
+    )
+    fix = score_fix(fault, resolved, baseline, final, mutations)
     trace.log("fix_score", **asdict(fix))
     try:
         judgement = judge_root_cause(fault.ground_truth, outcome.root_cause, outcome.fix_summary)
