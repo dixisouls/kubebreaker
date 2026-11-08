@@ -13,6 +13,7 @@ from kubebreaker.agent.trace import Trace
 from kubebreaker.chaos import Fault, runner
 from kubebreaker.kube import Kube
 from kubebreaker.llm import LLMClient
+from kubebreaker.pricing import cost_usd
 from kubebreaker.scoring.judge import judge_root_cause
 from kubebreaker.scoring.score import score_fix
 from kubebreaker.scoring.snapshot import take_snapshot
@@ -36,6 +37,7 @@ class EpisodeResult:
     input_tokens: int
     output_tokens: int
     cached_tokens: int
+    cache_write_tokens: int
     agent_seconds: float
     # Wall clock from alert to the health check passing; None if never resolved
     time_to_resolve_seconds: float | None
@@ -60,6 +62,11 @@ class EpisodeResult:
     # Turns produced by a provider-side fallback model; exclude such runs from per-model stats
     fallback_turns: int = 0
     served_by: list[str] = field(default_factory=list)
+    # Dollar cost from pricing.PRICES; None when a model has no price entry
+    agent_cost_usd: float | None = None
+    judge_cost_usd: float | None = None
+    max_steps: int = 0
+    effort: str = ""
     error: str = ""
     run_dir: str = ""
 
@@ -124,6 +131,7 @@ def run_episode(
         input_tokens=outcome.usage.input_tokens,
         output_tokens=outcome.usage.output_tokens,
         cached_tokens=outcome.usage.cached_tokens,
+        cache_write_tokens=outcome.usage.cache_write_tokens,
         agent_seconds=round(outcome.seconds, 1),
         time_to_resolve_seconds=ttr,
         root_cause=outcome.root_cause,
@@ -142,6 +150,14 @@ def run_episode(
         root_cause_reason=judgement.reason if judgement else "",
         judge=judgement.judge if judgement else "",
         judge_same_provider=bool(judgement) and judgement.judge.split("/")[0] == llm.provider,
+        agent_cost_usd=cost_usd(llm.model, outcome.usage),
+        judge_cost_usd=(
+            cost_usd(judgement.judge.split("/", 1)[1], judgement.usage)
+            if judgement and judgement.usage
+            else 0.0
+        ),
+        max_steps=max_steps,
+        effort=getattr(llm, "effort", None) or getattr(llm, "reasoning_effort", None) or "",
         fallback_turns=outcome.fallback_turns,
         served_by=outcome.served_by,
         error=outcome.error,

@@ -1,0 +1,12 @@
+# The headline comparison: both models on every fault, 3 repeats each.
+name: core
+repeats: 3
+faults: all
+configs:
+  - label: terra
+    provider: openai
+    model: gpt-6.1-terra
+  - label: sonnet
+    provider: anthropic
+    model: claude-sonnet-5-5
+    effort: medium

@@ -1,0 +1,11 @@
+# How does resolve rate change with the step budget? (20 steps is covered by core.yaml)
+name: step-budget
+repeats: 3
+faults: all
+configs:
+  - {label: terra-5, provider: openai, model: gpt-6.1-terra, max_steps: 5}
+  - {label: terra-10, provider: openai, model: gpt-6.1-terra, max_steps: 10}
+  - {label: terra-30, provider: openai, model: gpt-6.1-terra, max_steps: 30}
+  - {label: sonnet-5, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 5}
+  - {label: sonnet-10, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 10}
+  - {label: sonnet-30, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 30}

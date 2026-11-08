@@ -67,7 +67,7 @@ def _usage(u) -> Usage:
     cached = getattr(u, "cache_read_input_tokens", 0) or 0
     created = getattr(u, "cache_creation_input_tokens", 0) or 0
     # Anthropic reports cache reads and writes separately from input_tokens
-    return Usage((u.input_tokens or 0) + cached + created, u.output_tokens or 0, cached)
+    return Usage((u.input_tokens or 0) + cached + created, u.output_tokens or 0, cached, created)
 
 
 def from_response(resp) -> LLMResponse:

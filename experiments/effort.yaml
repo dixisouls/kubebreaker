@@ -1,0 +1,9 @@
+# Does more reasoning help? (Sonnet at medium and terra at its default are covered by core.yaml)
+name: effort
+repeats: 3
+faults: all
+configs:
+  - {label: sonnet-low, provider: anthropic, model: claude-sonnet-5-5, effort: low}
+  - {label: sonnet-high, provider: anthropic, model: claude-sonnet-5-5, effort: high}
+  - {label: terra-medium, provider: openai, model: gpt-6.1-terra, effort: medium}
+  - {label: terra-high, provider: openai, model: gpt-6.1-terra, effort: high}

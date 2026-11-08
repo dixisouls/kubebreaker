@@ -170,3 +170,14 @@ def test_fallback_turns_are_counted():
     llm = FallsBack([[call(1, "get_events")], [ToolCall("c2", "declare_resolved", {})]])
     out = run_agent(llm, RecordingTools(), "alert", Trace(None))
     assert out.fallback_turns == 2 and out.served_by == ["other-model"]
+
+
+def test_parallel_calls_cannot_exceed_the_step_cap():
+    batch = [call(i, "get_events") for i in range(4)]
+    llm = ScriptedLLM([batch, batch, batch])
+    tools = RecordingTools()
+    trace = Trace(None)
+    out = run_agent(llm, tools, "alert", trace, max_steps=6)
+    assert out.steps == 6 and len(tools.calls) == 6 and out.stop_reason == "max_steps"
+    # the last two calls of the second batch got a result but weren't executed or counted
+    assert [e["kind"] for e in trace.events].count("over_budget") == 2

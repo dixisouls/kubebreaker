@@ -74,7 +74,12 @@ def from_response(resp) -> LLMResponse:
             calls.append(ToolCall(item.call_id, item.name, parse_args(item.arguments)))
     u = resp.usage
     details = getattr(u, "input_tokens_details", None)
-    usage = Usage(u.input_tokens, u.output_tokens, getattr(details, "cached_tokens", 0) or 0)
+    usage = Usage(
+        u.input_tokens,
+        u.output_tokens,
+        getattr(details, "cached_tokens", 0) or 0,
+        getattr(details, "cache_write_tokens", 0) or 0,
+    )
     if calls:
         stop = "tool_use"
     elif resp.status == "incomplete":

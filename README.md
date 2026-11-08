@@ -80,6 +80,16 @@ uv run kubebreaker run wrong-db-host     # reset, inject, alert the agent, verif
 
 Each run writes `runs/<time>-<fault>/trace.jsonl` (every LLM turn and tool call, with the agent's stated purpose) and `result.json` (resolved, steps, tokens, time, root cause, every change the agent made).
 
+Run experiments (each asks before spending money):
+
+```sh
+uv run kubebreaker sweep experiments/core.yaml --dry-run    # plan, cost and time estimate only
+uv run kubebreaker sweep experiments/core.yaml --max-cost 5 # run it, stop if spend reaches $5
+uv run kubebreaker report runs/sweeps/core                  # HTML report with charts
+```
+
+Sweeps are resumable: finished episodes are skipped. See `experiments/` for the core comparison, step-budget and effort sweeps.
+
 Run `make help` for all targets. Tested with kind v0.33.0 (Kubernetes v1.37.0) and Calico v3.33.0.
 
 ## Safety
