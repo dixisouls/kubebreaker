@@ -214,7 +214,7 @@ def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[
             f"  {c.label:<14}{c.model:<20}{c.max_steps:>6}{c.effort or '-':>8}{len(mine):>6}"
             f"{'$' + format(cost, '.2f'):>11}{secs / 3600:>10.1f}h  {_basis(history, c.model)}"
         )
-    judge = len(jobs) * 0.003  # ~600 input + ~150 output tokens per judgement on Sonnet 5.5
+    judge = len(jobs) * judge_cost_estimate()
     lines.append(
         f"  {'judge':<14}{'':<20}{'':>6}{'':>8}{len(jobs):>6}{'$' + format(judge, '.2f'):>11}"
     )
@@ -229,6 +229,18 @@ def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[
     if missing - unpriced:
         lines.append(f"  warning: no price for {sorted(missing - unpriced)}")
     return "\n".join(lines), total_cost
+
+
+# One judgement, measured on gemini-3.8-flash at medium thinking: ~250 prompt tokens and
+# ~125-200 output tokens including thinking. Rounded up for longer write-ups.
+JUDGE_USAGE = Usage(input_tokens=400, output_tokens=300)
+
+
+def judge_cost_estimate() -> float:
+    import os
+
+    model = os.environ.get("JUDGE_MODEL") or ""
+    return cost_usd(model, JUDGE_USAGE) or 0.003
 
 
 def _basis(history: History, model: str) -> str:

@@ -52,4 +52,8 @@ def make_client(
         fallbacks = os.environ.get("LLM_FALLBACKS", "default").lower() != "off"
         # Explicit effort; medium is the recommended start for multistep tool use
         return AnthropicClient(model, max_out, effort or "medium", fallbacks)
-    raise ValueError(f"unknown provider {provider!r}: use 'openai' or 'anthropic'")
+    if provider == "google":
+        from kubebreaker.llm.google_client import GoogleClient
+
+        return GoogleClient(model, max_out, effort)
+    raise ValueError(f"unknown provider {provider!r}: use 'openai', 'anthropic' or 'google'")

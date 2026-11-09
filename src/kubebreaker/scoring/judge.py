@@ -61,7 +61,7 @@ def judge_root_cause(
     llm = llm or make_client(
         os.environ.get("JUDGE_PROVIDER") or None,
         os.environ.get("JUDGE_MODEL") or None,
-        effort="low",  # a short grading task
+        effort=os.environ.get("JUDGE_EFFORT") or "low",
     )
     resp = llm.chat(
         JUDGE_PROMPT, [Message("user", judge_prompt(ground_truth, root_cause, fix_summary))], []
