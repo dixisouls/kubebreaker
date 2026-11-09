@@ -146,3 +146,31 @@ def test_episode_records_the_alert_hold(tmp_path, fake_cluster, monkeypatch):
     monkeypatch.setattr(episode, "score_fix", lambda *a: FixScore(1.0, "clean"))
     r = episode.run_episode(None, FAULT, LLM, run_dir=tmp_path)
     assert seen["hold"] == 45 and r.alert_hold_seconds == 45
+
+
+def test_zero_hold_needs_one_passing_poll_and_negative_hold_is_rejected(monkeypatch):
+    from kubebreaker.chaos import runner
+
+    assert runner.sustained(lambda: True, seconds=0, timeout=1, interval=0.05)
+    monkeypatch.setenv("ALERT_HOLD_SECONDS", "-5")
+    with pytest.raises(ValueError):
+        runner.alert_hold_seconds()
+
+
+def test_sustained_does_not_overshoot_its_timeout():
+    import time
+
+    from kubebreaker.chaos.runner import sustained
+
+    start = time.monotonic()
+    assert sustained(lambda: False, seconds=1, timeout=0.2, interval=0.5) is False
+    assert time.monotonic() - start < 0.45  # one 0.5s sleep would overshoot
+
+
+def test_time_estimate_follows_the_configured_hold(monkeypatch):
+    def secs(hold):
+        monkeypatch.setenv("ALERT_HOLD_SECONDS", str(hold))
+        job = sweep.Job(sweep.Config("x", "openai", "gpt-6.1-terra"), "wrong-db-host", 1)
+        return sweep.estimate_job(job, sweep.History()).seconds
+
+    assert secs(90) - secs(0) == pytest.approx(90)

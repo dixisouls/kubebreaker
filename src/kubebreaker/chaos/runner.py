@@ -18,7 +18,10 @@ DEFAULT_ALERT_HOLD = 45
 
 
 def alert_hold_seconds() -> int:
-    return int(os.environ.get("ALERT_HOLD_SECONDS", DEFAULT_ALERT_HOLD))
+    hold = int(os.environ.get("ALERT_HOLD_SECONDS", DEFAULT_ALERT_HOLD))
+    if hold < 0:
+        raise ValueError(f"ALERT_HOLD_SECONDS must be 0 or more, got {hold}")
+    return hold
 
 
 class ChaosError(RuntimeError):
@@ -44,14 +47,17 @@ def inject(k: Kube, fault: Fault, timeout: float = SYMPTOM_TIMEOUT, hold: float 
     fault.inject(k)
     if not wait_for(lambda: fault.symptom(k), timeout):
         raise ChaosError(f"{fault.id}: symptom did not appear within {timeout}s")
-    if hold and not sustained(lambda: fault.symptom(k), hold, timeout=hold + timeout):
+    if hold > 0 and not sustained(lambda: fault.symptom(k), hold, timeout=hold + timeout):
         raise ChaosError(f"{fault.id}: symptom didn't hold for {hold}s in a row")
     return time.monotonic() - start
 
 
 def sustained(check, seconds: float, timeout: float, interval: float = 5.0) -> bool:
     """True once `check` has been true on every poll for `seconds`; a false (or erroring)
-    poll restarts the clock. False if that doesn't happen within `timeout`."""
+    poll restarts the clock. False if that doesn't happen within `timeout`.
+
+    With `seconds` <= 0, one passing poll is enough (there's no duration to hold for).
+    """
     deadline = time.monotonic() + timeout
     since = time.monotonic()
     while time.monotonic() < deadline:
@@ -64,7 +70,8 @@ def sustained(check, seconds: float, timeout: float, interval: float = 5.0) -> b
             since = now
         elif now - since >= seconds:
             return True
-        time.sleep(interval)
+        # Never sleep past the deadline
+        time.sleep(max(0.0, min(interval, deadline - time.monotonic())))
     return False
 
 
