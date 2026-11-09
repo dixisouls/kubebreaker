@@ -75,13 +75,17 @@ def cmd_selftest(args) -> int:
 
 
 def cmd_run(args) -> int:
-    from kubebreaker.episode import run_episode
+    from kubebreaker.episode import EpisodeAborted, run_episode
     from kubebreaker.llm import make_client
 
     fault = _fault(args.fault)
     llm = make_client(args.provider, args.model, effort=args.effort)
     print(f"episode: {fault.id} with {llm.provider}/{llm.model} (max {args.max_steps} steps)")
-    r = run_episode(Kube.from_env(), fault, llm, args.max_steps, args.max_tokens)
+    try:
+        r = run_episode(Kube.from_env(), fault, llm, args.max_steps, args.max_tokens)
+    except EpisodeAborted as exc:
+        print(f"\nABORTED, not a result: {exc}  (spent ${exc.cost_usd:.3f})")
+        return 2
     verdict = "RESOLVED" if r.resolved else "NOT RESOLVED"
     ttr = f"{r.time_to_resolve_seconds:.0f}s" if r.time_to_resolve_seconds else "-"
     print(f"\n{verdict}  steps={r.steps}  time={ttr}  stop={r.stop_reason}")

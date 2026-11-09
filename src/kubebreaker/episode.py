@@ -19,6 +19,7 @@ from kubebreaker.scoring.score import score_fix
 from kubebreaker.scoring.snapshot import take_snapshot
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
+ERRORS_FILE = "errors.jsonl"
 # After the agent stops, give the cluster a little time to settle before judging
 SETTLE_SECONDS = 90
 
@@ -71,6 +72,29 @@ class EpisodeResult:
     run_dir: str = ""
 
 
+class EpisodeAborted(RuntimeError):
+    """The episode couldn't be measured because an API call failed (no credits, rate limits,
+    outages). It isn't a result: nothing is recorded as a failure, and a sweep retries it.
+    Money already spent on the attempt is in `cost_usd` and in errors.jsonl."""
+
+    def __init__(self, message: str, cost_usd: float):
+        super().__init__(message)
+        self.cost_usd = cost_usd
+
+
+def _abort(run_dir: Path, trace: Trace, stage: str, error: str, cost: float) -> EpisodeAborted:
+    record = {
+        "time": datetime.now(UTC).isoformat(),
+        "stage": stage,
+        "error": error,
+        "cost_usd": round(cost, 6),
+    }
+    trace.log("aborted", **record)
+    with (run_dir / ERRORS_FILE).open("a") as f:
+        f.write(json.dumps(record) + "\n")
+    return EpisodeAborted(f"{stage} API call failed: {error}", cost)
+
+
 def new_run_dir(fault_id: str) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return RUNS_DIR / f"{stamp}-{fault_id}"
@@ -85,7 +109,12 @@ def run_episode(
     run_dir: Path | None = None,
 ) -> EpisodeResult:
     run_dir = run_dir or new_run_dir(fault.id)
-    trace = Trace(run_dir / "trace.jsonl")
+    trace_path = run_dir / "trace.jsonl"
+    if trace_path.exists():
+        # A retry after an aborted attempt: keep the old trace for inspection
+        n = len(list(run_dir.glob("trace.attempt-*.jsonl"))) + 1
+        trace_path.rename(run_dir / f"trace.attempt-{n}.jsonl")
+    trace = Trace(trace_path)
 
     trace.log("reset")
     runner.reset_app(admin)
@@ -96,6 +125,9 @@ def run_episode(
     tools = AgentTools(agent_kube(admin))
     alert_at = time.monotonic()
     outcome = run_agent(llm, tools, fault.alert, trace, max_steps, max_tokens)
+    agent_cost = cost_usd(llm.model, outcome.usage) or 0.0
+    if outcome.stop_reason == "llm_error":
+        raise _abort(run_dir, trace, "agent", outcome.error, agent_cost)
 
     remaining = runner.verify(admin, fault, timeout=SETTLE_SECONDS)
     resolved = not remaining
@@ -113,10 +145,8 @@ def run_episode(
     try:
         judgement = judge_root_cause(fault.ground_truth, outcome.root_cause, outcome.fix_summary)
     except Exception as exc:
-        judgement = None
-        trace.log("judge_error", error=f"{type(exc).__name__}: {exc}")
-    if judgement:
-        trace.log("root_cause_judged", **asdict(judgement))
+        raise _abort(run_dir, trace, "judge", f"{type(exc).__name__}: {exc}", agent_cost) from exc
+    trace.log("root_cause_judged", **asdict(judgement))
 
     result = EpisodeResult(
         fault_id=fault.id,
@@ -145,16 +175,14 @@ def run_episode(
         collateral=fix.collateral,
         fix_changes=fix.fix_changes,
         disruptive_actions=fix.disruptive_actions,
-        root_cause_verdict=judgement.verdict if judgement else "judge_error",
-        root_cause_score=judgement.score if judgement else 0.0,
-        root_cause_reason=judgement.reason if judgement else "",
-        judge=judgement.judge if judgement else "",
-        judge_same_provider=bool(judgement) and judgement.judge.split("/")[0] == llm.provider,
+        root_cause_verdict=judgement.verdict,
+        root_cause_score=judgement.score,
+        root_cause_reason=judgement.reason,
+        judge=judgement.judge,
+        judge_same_provider=judgement.judge.split("/")[0] == llm.provider,
         agent_cost_usd=cost_usd(llm.model, outcome.usage),
         judge_cost_usd=(
-            cost_usd(judgement.judge.split("/", 1)[1], judgement.usage)
-            if judgement and judgement.usage
-            else 0.0
+            cost_usd(judgement.judge.split("/", 1)[1], judgement.usage) if judgement.usage else 0.0
         ),
         max_steps=max_steps,
         effort=getattr(llm, "effort", None) or getattr(llm, "reasoning_effort", None) or "",

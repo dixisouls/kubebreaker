@@ -239,32 +239,52 @@ def _basis(history: History, model: str) -> str:
 # --- running ---
 
 
+# After this many API failures in a row, a provider is skipped for the rest of the run
+# (usually means its credits ran out); its jobs stay pending for the next run
+MAX_CONSECUTIVE_API_FAILURES = 3
+
+
 def run_sweep(exp: Experiment, max_cost: float | None = None, log=print) -> list[dict]:
-    """Run all pending jobs in order. Stops early once actual spend passes `max_cost`."""
-    from kubebreaker.episode import run_episode
+    """Run all pending jobs in order. Stops early once actual spend passes `max_cost`.
+    Episodes that fail on an API error aren't recorded as results; they're retried next run."""
+    from kubebreaker.episode import EpisodeAborted, run_episode
     from kubebreaker.kube import Kube
     from kubebreaker.llm import make_client
 
     admin = Kube.from_env()
     jobs = exp.pending()
-    spent = sum(_spent(j.run_dir(exp.name)) for j in exp.jobs() if j not in jobs)
+    spent = sum(_spent(j.run_dir(exp.name)) for j in exp.jobs())
+    failures: dict[str, int] = {}
     results = []
     for i, job in enumerate(jobs, 1):
         if max_cost is not None and spent >= max_cost:
             log(f"stopping: spent ${spent:.2f}, cap is ${max_cost:.2f}")
             break
         c = job.config
+        if failures.get(c.provider, 0) >= MAX_CONSECUTIVE_API_FAILURES:
+            continue
         run_dir = job.run_dir(exp.name)
         log(f"[{i}/{len(jobs)}] {c.label} {job.fault_id} r{job.repeat} ...")
         try:
             llm = make_client(c.provider, c.model, effort=c.effort or None)
             r = run_episode(admin, CATALOG[job.fault_id], llm, c.max_steps, run_dir=run_dir)
+        except EpisodeAborted as exc:
+            spent += exc.cost_usd
+            failures[c.provider] = failures.get(c.provider, 0) + 1
+            log(f"    not counted, will retry next run: {exc}")
+            if failures[c.provider] == MAX_CONSECUTIVE_API_FAILURES:
+                log(
+                    f"    skipping remaining {c.provider} jobs this run "
+                    f"({MAX_CONSECUTIVE_API_FAILURES} API failures in a row; out of credits?)"
+                )
+            continue
         except Exception as exc:
-            # One broken episode shouldn't sink an overnight sweep; it's retried next time
+            # A harness or cluster problem: also retried next run
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
-            log(f"    error: {type(exc).__name__}: {exc}")
+            log(f"    error, will retry next run: {type(exc).__name__}: {exc}")
             continue
+        failures[c.provider] = 0
         spent += (r.agent_cost_usd or 0) + (r.judge_cost_usd or 0)
         verdict = "resolved" if r.resolved else "NOT resolved"
         log(
@@ -276,8 +296,15 @@ def run_sweep(exp: Experiment, max_cost: float | None = None, log=print) -> list
 
 
 def _spent(run_dir: Path) -> float:
-    f = run_dir / "result.json"
-    if not f.exists():
-        return 0.0
-    r = json.loads(f.read_text())
-    return (r.get("agent_cost_usd") or 0) + (r.get("judge_cost_usd") or 0)
+    """Money spent on a job so far: its result, plus any aborted attempts."""
+    total = 0.0
+    result = run_dir / "result.json"
+    if result.exists():
+        r = json.loads(result.read_text())
+        total += (r.get("agent_cost_usd") or 0) + (r.get("judge_cost_usd") or 0)
+    errors = run_dir / "errors.jsonl"
+    if errors.exists():
+        total += sum(
+            json.loads(line).get("cost_usd", 0) for line in errors.read_text().splitlines() if line
+        )
+    return total
