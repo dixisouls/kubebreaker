@@ -155,6 +155,9 @@ def test_zero_hold_needs_one_passing_poll_and_negative_hold_is_rejected(monkeypa
     monkeypatch.setenv("ALERT_HOLD_SECONDS", "-5")
     with pytest.raises(ValueError):
         runner.alert_hold_seconds()
+    monkeypatch.setenv("ALERT_HOLD_SECONDS", "abc")
+    with pytest.raises(ValueError, match="whole number"):
+        runner.alert_hold_seconds()
 
 
 def test_sustained_does_not_overshoot_its_timeout():

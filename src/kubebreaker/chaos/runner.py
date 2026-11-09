@@ -18,7 +18,11 @@ DEFAULT_ALERT_HOLD = 45
 
 
 def alert_hold_seconds() -> int:
-    hold = int(os.environ.get("ALERT_HOLD_SECONDS", DEFAULT_ALERT_HOLD))
+    raw = os.environ.get("ALERT_HOLD_SECONDS", str(DEFAULT_ALERT_HOLD))
+    try:
+        hold = int(raw)
+    except ValueError:
+        raise ValueError(f"ALERT_HOLD_SECONDS must be a whole number, got {raw!r}") from None
     if hold < 0:
         raise ValueError(f"ALERT_HOLD_SECONDS must be 0 or more, got {hold}")
     return hold
@@ -47,6 +51,9 @@ def inject(k: Kube, fault: Fault, timeout: float = SYMPTOM_TIMEOUT, hold: float 
     fault.inject(k)
     if not wait_for(lambda: fault.symptom(k), timeout):
         raise ChaosError(f"{fault.id}: symptom did not appear within {timeout}s")
+    # The hold gets its own window: a symptom that flickers at first (e.g. while the Redis
+    # cache drains) may need a while to settle into an unbroken run of `hold` seconds. Worst
+    # case, inject takes timeout + hold + timeout.
     if hold > 0 and not sustained(lambda: fault.symptom(k), hold, timeout=hold + timeout):
         raise ChaosError(f"{fault.id}: symptom didn't hold for {hold}s in a row")
     return time.monotonic() - start
