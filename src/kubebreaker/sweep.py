@@ -27,14 +27,15 @@ from pathlib import Path
 
 import yaml
 
-from kubebreaker.chaos import CATALOG, Tier
+from kubebreaker.chaos import CATALOG, Tier, runner
 from kubebreaker.episode import RUNS_DIR
 from kubebreaker.llm import Usage
 from kubebreaker.pricing import PRICES, cost_usd
 
 DEFAULT_STEPS = 20
-# Fixed per-episode overhead beyond the agent itself: reset (~20s), waiting for the
-# symptom (5-60s), and verification/settling (up to 90s when the fix didn't land)
+# Fixed per-episode overhead beyond the agent itself, not counting the alert hold: reset
+# (~20s), waiting for the symptom (5-60s), and verification/settling (up to 90s when the
+# fix didn't land). The configured alert hold is added on top in estimate_job.
 OVERHEAD_SECONDS = 75
 # Rough output-token multipliers by reasoning effort, relative to the default
 EFFORT_OUTPUT = {"": 1.0, "low": 0.6, "medium": 1.0, "high": 1.6, "xhigh": 2.5, "max": 3.5}
@@ -185,7 +186,11 @@ def estimate_job(job: Job, history: History) -> Estimate:
         cache_write_tokens=int(base["cache_write"] * scale),
     )
     cost = cost_usd(c.model, usage)
-    seconds = OVERHEAD_SECONDS + base["agent_seconds"] * scale * (0.5 + effort / 2)
+    seconds = (
+        OVERHEAD_SECONDS
+        + runner.alert_hold_seconds()
+        + base["agent_seconds"] * scale * (0.5 + effort / 2)
+    )
     return Estimate(cost or 0.0, seconds, cost is not None, source)
 
 

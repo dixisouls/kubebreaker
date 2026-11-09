@@ -68,6 +68,9 @@ class EpisodeResult:
     judge_cost_usd: float | None = None
     max_steps: int = 0
     effort: str = ""
+    # Seconds the symptom had to persist before the agent was alerted (0 in runs before this
+    # setting existed); compare only runs with the same value
+    alert_hold_seconds: int = 0
     error: str = ""
     run_dir: str = ""
 
@@ -119,8 +122,9 @@ def run_episode(
     trace.log("reset")
     runner.reset_app(admin)
     baseline = take_snapshot(admin)
-    symptom_s = runner.inject(admin, fault)
-    trace.log("injected", fault=fault.id, symptom_seconds=round(symptom_s, 1))
+    hold = runner.alert_hold_seconds()
+    symptom_s = runner.inject(admin, fault, hold=hold)
+    trace.log("injected", fault=fault.id, symptom_seconds=round(symptom_s, 1), alert_hold=hold)
 
     tools = AgentTools(agent_kube(admin))
     alert_at = time.monotonic()
@@ -185,6 +189,7 @@ def run_episode(
             cost_usd(judgement.judge.split("/", 1)[1], judgement.usage) if judgement.usage else 0.0
         ),
         max_steps=max_steps,
+        alert_hold_seconds=hold,
         effort=getattr(llm, "effort", None) or getattr(llm, "reasoning_effort", None) or "",
         fallback_turns=outcome.fallback_turns,
         served_by=outcome.served_by,

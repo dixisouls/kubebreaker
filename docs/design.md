@@ -68,6 +68,10 @@ Faults that change a pod template cause a **partial outage**: the rolling update
 
 `missing-secret-ref` replaces the original "delete the Secret" idea. A deleted Secret holds a password the agent has no way to recover, while a wrong reference can be found and fixed from what the cluster shows.
 
+## Alert timing
+
+The agent is alerted only after the fault's symptom has held without a break for `ALERT_HOLD_SECONDS` (default 45s), like the `for:` clause on a Prometheus alerting rule. Without the hold, the alert fired about 20 seconds after a reset, before Prometheus had collected enough samples: in the first core sweep, error-rate queries returned "no data" and one agent concluded a NetworkPolicy outage was "a startup blip". Every result records `alert_hold_seconds`; the first core sweep ran with 0, so compare only runs with the same value. Selftests skip the hold.
+
 ## Runtime layout
 
 - `kind` and `kubectl` run on the host. kind is never run inside a container.
