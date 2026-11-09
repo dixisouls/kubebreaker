@@ -157,11 +157,19 @@ Labels: clean (>= 0.9), acceptable (>= 0.6), band-aid (below). Unresolved scores
 
 ## Experiments
 
-- Model size: small vs large vs plan-large/execute-small
-- Provider: OpenAI vs Anthropic at similar price points
-- Signals: logs only vs logs + metrics
-- Memory: no runbook vs retrieved past postmortems
-- Topology: single agent vs triage + specialist
-- Step budget: 5 / 10 / 20
+Code: `src/kubebreaker/sweep.py`, `src/kubebreaker/report.py`, `src/kubebreaker/pricing.py`. Experiment files live in `experiments/`.
 
-Headline chart: resolve rate against cost per configuration.
+- **Sweeps** run every (configuration, fault, repeat) in an experiment file, in repeat-major order so a stopped sweep still has even coverage. Results go to `runs/sweeps/<name>/<label>/<fault>/r<n>/`; finished jobs are skipped on the next run. A failing episode writes `error.txt` and the sweep carries on.
+- **Cost guard**: `--dry-run` prints the plan with an estimate; a real run asks for confirmation (unless `--yes`) and stops once actual spend reaches `--max-cost`.
+- **Estimates** come from the token usage of every past episode, by model and tier. Input tokens are scaled by (steps)^1.5 because each turn re-sends the history, output tokens linearly, and output by a rough effort multiplier. A 2x margin is printed alongside, since history is thin and repeat runs vary.
+- **Costs** per episode (agent and judge) are computed from `pricing.PRICES`, including cache reads and writes.
+- **Step cap is exact**: tool calls in a parallel batch beyond the budget get a "not run" result and aren't counted.
+
+| File | Configurations | Episodes |
+| --- | --- | --- |
+| `smoke.yaml` | terra, terra-high, sonnet, sonnet-high on one fault | 4 |
+| `core.yaml` | terra vs Sonnet 5.5 (medium), all faults, 3 repeats | 72 |
+| `step-budget.yaml` | both models at 5, 10 and 30 steps | 216 |
+| `effort.yaml` | Sonnet low/high, terra medium/high | 144 |
+
+**Report**: `kubebreaker report <dir>` writes one self-contained HTML page: a configuration table, solve rate vs cost (scatter), solve rate by tier (grouped columns), solve rate vs step budget (when budgets vary), a fault × configuration matrix, and every episode in a table. "Solved" means resolved and the root cause judged correct. Colors come from a categorical palette validated for colour-vision deficiency in light and dark mode; every charted value is also in a table.

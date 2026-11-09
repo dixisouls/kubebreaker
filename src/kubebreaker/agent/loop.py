@@ -26,6 +26,7 @@ The app runs in namespace `shop`. Cluster DNS (CoreDNS) runs in `kube-system`.
 """
 
 NUDGE = "Continue the investigation with your tools, or call declare_resolved if it's fixed."
+OVER_BUDGET = "Not run: the tool-call budget is used up."
 
 
 class Tools(Protocol):
@@ -135,6 +136,12 @@ def run_agent(
 
         results = []
         for call in resp.message.tool_calls:
+            # Every call gets a result (the APIs require one), but calls past the budget
+            # aren't executed or counted, so the step cap is exact
+            if out.steps >= max_steps:
+                results.append(ToolResult(call.id, OVER_BUDGET))
+                trace.log("over_budget", name=call.name)
+                continue
             out.steps += 1
             if call.name == final_tool:
                 out.declared = True

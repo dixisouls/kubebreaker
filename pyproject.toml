@@ -7,6 +7,7 @@ license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic==2.6.0",
+    "google-genai==3.0.0",
     "kubernetes==37.0.2",
     "openai==3.46.0",
     "python-dotenv==1.2.4",
@@ -32,6 +33,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# HTML and SVG templates read better unwrapped
+"src/kubebreaker/report.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

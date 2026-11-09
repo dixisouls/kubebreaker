@@ -75,13 +75,17 @@ def cmd_selftest(args) -> int:
 
 
 def cmd_run(args) -> int:
-    from kubebreaker.episode import run_episode
+    from kubebreaker.episode import EpisodeAborted, run_episode
     from kubebreaker.llm import make_client
 
     fault = _fault(args.fault)
-    llm = make_client(args.provider, args.model)
+    llm = make_client(args.provider, args.model, effort=args.effort)
     print(f"episode: {fault.id} with {llm.provider}/{llm.model} (max {args.max_steps} steps)")
-    r = run_episode(Kube.from_env(), fault, llm, args.max_steps, args.max_tokens)
+    try:
+        r = run_episode(Kube.from_env(), fault, llm, args.max_steps, args.max_tokens)
+    except EpisodeAborted as exc:
+        print(f"\nABORTED, not a result: {exc}  (spent ${exc.cost_usd:.3f})")
+        return 2
     verdict = "RESOLVED" if r.resolved else "NOT RESOLVED"
     ttr = f"{r.time_to_resolve_seconds:.0f}s" if r.time_to_resolve_seconds else "-"
     print(f"\n{verdict}  steps={r.steps}  time={ttr}  stop={r.stop_reason}")
@@ -110,10 +114,39 @@ def cmd_run(args) -> int:
     return 0 if r.resolved else 1
 
 
+def cmd_sweep(args) -> int:
+    from kubebreaker import sweep
+
+    exp = sweep.load(args.experiment)
+    pending = exp.pending()
+    done = len(exp.jobs()) - len(pending)
+    plan, cost = sweep.summarize_plan(exp, pending, sweep.History.from_runs())
+    print(plan)
+    if done:
+        print(f"  ({done} episodes already done and skipped)")
+    if args.dry_run or not pending:
+        return 0
+    if not args.yes:
+        answer = input(f"Run {len(pending)} episodes for about ${cost:.2f}? [y/N] ")
+        if answer.strip().lower() != "y":
+            print("cancelled")
+            return 1
+    sweep.run_sweep(exp, args.max_cost)
+    return 0
+
+
+def cmd_report(args) -> int:
+    from kubebreaker import report
+
+    out = report.write(Path(args.runs_dir), Path(args.out), args.title)
+    print(f"report: {out.resolve()}")
+    return 0
+
+
 def cmd_results(args) -> int:
     import json
 
-    files = sorted(Path(args.runs_dir).glob("*/result.json"))
+    files = sorted(Path(args.runs_dir).glob("**/result.json"))
     if not files:
         print(f"no results in {args.runs_dir}")
         return 1
@@ -171,7 +204,21 @@ def main() -> None:
     p.add_argument("--model", help="model name (default: LLM_MODEL)")
     p.add_argument("--max-steps", type=int, default=20)
     p.add_argument("--max-tokens", type=int, default=600_000)
+    p.add_argument("--effort", help="reasoning effort: low, medium, high (default: per provider)")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("sweep", help="run an experiment file (resumable)")
+    p.add_argument("experiment", help="path to an experiment YAML, e.g. experiments/core.yaml")
+    p.add_argument("--dry-run", action="store_true", help="show the plan and estimate only")
+    p.add_argument("--yes", action="store_true", help="don't ask for confirmation")
+    p.add_argument("--max-cost", type=float, help="stop once actual spend reaches this many USD")
+    p.set_defaults(func=cmd_sweep)
+
+    p = sub.add_parser("report", help="build an HTML report with charts from results")
+    p.add_argument("runs_dir", nargs="?", default="runs")
+    p.add_argument("-o", "--out", default="runs/report.html")
+    p.add_argument("--title", default="kubebreaker results")
+    p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("results", help="summarize episode results")
     p.add_argument("runs_dir", nargs="?", default="runs")

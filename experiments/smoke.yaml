@@ -1,0 +1,10 @@
+# A few cheap episodes to check the sweep runner end to end and calibrate cost estimates
+# for higher reasoning effort. Costs well under a dollar.
+name: smoke
+repeats: 1
+faults: [wrong-db-host]
+configs:
+  - {label: terra, provider: openai, model: gpt-6.1-terra}
+  - {label: terra-high, provider: openai, model: gpt-6.1-terra, effort: high}
+  - {label: sonnet, provider: anthropic, model: claude-sonnet-5-5, effort: medium}
+  - {label: sonnet-high, provider: anthropic, model: claude-sonnet-5-5, effort: high}

@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from kubebreaker.llm import LLMClient, Message, make_client
+from kubebreaker.llm import LLMClient, Message, Usage, make_client
 
 JUDGE_PROMPT = """\
 You grade root-cause analyses written by an on-call engineer after a Kubernetes incident.
@@ -29,6 +29,7 @@ class Judgement:
     score: float
     reason: str
     judge: str  # provider/model, or "none" when no LLM call was needed
+    usage: Usage | None = None
 
 
 def judge_prompt(ground_truth: str, root_cause: str, fix_summary: str) -> str:
@@ -60,10 +61,10 @@ def judge_root_cause(
     llm = llm or make_client(
         os.environ.get("JUDGE_PROVIDER") or None,
         os.environ.get("JUDGE_MODEL") or None,
-        effort="low",  # a short grading task
+        effort=os.environ.get("JUDGE_EFFORT") or "low",
     )
     resp = llm.chat(
         JUDGE_PROMPT, [Message("user", judge_prompt(ground_truth, root_cause, fix_summary))], []
     )
     verdict, reason = parse_verdict(resp.message.text or "")
-    return Judgement(verdict, SCORES[verdict], reason, f"{llm.provider}/{llm.model}")
+    return Judgement(verdict, SCORES[verdict], reason, f"{llm.provider}/{llm.model}", resp.usage)

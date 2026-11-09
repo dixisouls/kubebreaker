@@ -184,3 +184,33 @@ def test_anthropic_fallback_is_detected_and_its_marker_dropped():
     assert r.fallback and r.served_by == "claude-sonnet-5"
     assert [b["type"] for b in r.message.raw] == ["text"]
     assert (r.usage.input_tokens, r.usage.output_tokens) == (120, 8)  # both attempts counted
+
+
+# --- Google (judge only) ---
+
+
+def test_google_contents_and_usage():
+    import pytest
+    from google.genai import types
+
+    from kubebreaker.llm import google_client as goog
+
+    contents = goog.to_contents([Message("user", "q"), Message("assistant", "a")])
+    assert [c.role for c in contents] == ["user", "model"]
+    with pytest.raises(NotImplementedError):
+        goog.to_contents([Message("tool", tool_results=[ToolResult("c", "x")])])
+
+    resp = NS(
+        text='{"verdict": "correct"}',
+        model_version="gemini-3.8-flash",
+        candidates=[NS(finish_reason=types.FinishReason.STOP)],
+        usage_metadata=NS(
+            prompt_token_count=800,
+            candidates_token_count=40,
+            thoughts_token_count=300,
+            cached_content_token_count=0,
+        ),
+    )
+    r = goog.from_response(resp)
+    assert r.stop == "end" and r.message.text == '{"verdict": "correct"}'
+    assert (r.usage.input_tokens, r.usage.output_tokens) == (800, 340)  # thinking billed as output
