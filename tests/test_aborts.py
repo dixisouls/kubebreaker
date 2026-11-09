@@ -15,7 +15,7 @@ from kubebreaker.llm import Usage
 def fake_cluster(monkeypatch):
     """Replace every cluster touchpoint of run_episode with no-ops."""
     monkeypatch.setattr(episode.runner, "reset_app", lambda k: None)
-    monkeypatch.setattr(episode.runner, "inject", lambda k, f: 1.0)
+    monkeypatch.setattr(episode.runner, "inject", lambda k, f, hold=0: 1.0)
     monkeypatch.setattr(episode.runner, "verify", lambda k, f, timeout: [])
     monkeypatch.setattr(episode, "take_snapshot", lambda k: {})
     monkeypatch.setattr(episode, "agent_kube", lambda k: None)
@@ -104,3 +104,45 @@ def test_sweep_skips_a_provider_after_repeated_api_failures(tmp_path, monkeypatc
     sweep.run_sweep(exp, log=lambda *a: None)
     assert len(calls) == sweep.MAX_CONSECUTIVE_API_FAILURES
     assert len(exp.pending()) == 5  # nothing recorded, all retried next run
+
+
+def test_sustained_needs_an_unbroken_run():
+    from kubebreaker.chaos.runner import sustained
+
+    flaky = iter([True, True, False, True, True, True, True, True])
+    assert sustained(lambda: next(flaky), seconds=0.12, timeout=2, interval=0.05)
+
+    always_off = sustained(lambda: False, seconds=0.05, timeout=0.3, interval=0.05)
+    assert always_off is False
+
+
+def test_sustained_treats_errors_as_a_break():
+    from kubebreaker.chaos.runner import sustained
+
+    def boom():
+        raise RuntimeError("api hiccup")
+
+    assert sustained(boom, seconds=0.05, timeout=0.3, interval=0.05) is False
+
+
+def test_episode_records_the_alert_hold(tmp_path, fake_cluster, monkeypatch):
+    from kubebreaker.scoring.judge import Judgement
+    from kubebreaker.scoring.score import FixScore
+
+    monkeypatch.setenv("ALERT_HOLD_SECONDS", "45")
+    seen = {}
+
+    def fake_inject(k, f, hold=0):
+        seen["hold"] = hold
+        return 1.0
+
+    monkeypatch.setattr(episode.runner, "inject", fake_inject)
+    monkeypatch.setattr(episode, "run_agent", lambda *a: outcome())
+    monkeypatch.setattr(
+        episode,
+        "judge_root_cause",
+        lambda *a: Judgement("correct", 1.0, "", "google/gemini-3.8-flash"),
+    )
+    monkeypatch.setattr(episode, "score_fix", lambda *a: FixScore(1.0, "clean"))
+    r = episode.run_episode(None, FAULT, LLM, run_dir=tmp_path)
+    assert seen["hold"] == 45 and r.alert_hold_seconds == 45

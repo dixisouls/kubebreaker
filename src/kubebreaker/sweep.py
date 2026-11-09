@@ -34,8 +34,9 @@ from kubebreaker.pricing import PRICES, cost_usd
 
 DEFAULT_STEPS = 20
 # Fixed per-episode overhead beyond the agent itself: reset (~20s), waiting for the
-# symptom (5-60s), and verification/settling (up to 90s when the fix didn't land)
-OVERHEAD_SECONDS = 75
+# symptom (5-60s), the alert hold, and verification/settling (up to 90s when the fix
+# didn't land)
+OVERHEAD_SECONDS = 75 + 45
 # Rough output-token multipliers by reasoning effort, relative to the default
 EFFORT_OUTPUT = {"": 1.0, "low": 0.6, "medium": 1.0, "high": 1.6, "xhigh": 2.5, "max": 3.5}
 # Used when there's no history at all for a model
