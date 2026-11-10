@@ -4,7 +4,7 @@
 
 kubebreaker breaks a local Kubernetes cluster in a known way, pages an LLM agent with an alert, and lets it diagnose and fix the incident using only what a human SRE would have: resources, events, logs and metrics. Every episode is scored on whether the app recovered, whether the agent named the right root cause, whether the fix was real or a band-aid, and whether it broke anything else.
 
-It runs on a laptop. A full 72-episode comparison of two models costs about $2.
+It runs on a laptop. A full 72-episode comparison of two models costs about $2.30.
 
 ## What an episode looks like
 
@@ -66,6 +66,24 @@ In the hard tier the symptom always shows up somewhere other than the cause. Eve
 | Fix quality | Starts at 1.0; band-aids (removed probe, removed limit, too few replicas) cost 0.4, collateral changes 0.15, unneeded restarts or pod deletions 0.05 |
 | Collateral damage | Every change outside the fault's fix scope, from a before/after snapshot diff |
 | Steps, time, cost | Tool calls, wall clock from alert to recovery, and dollars per episode (agent and judge) |
+
+## Results
+
+The `core` experiment: all 12 faults, 3 runs each, 20-step budget, medium effort, for two agents. Gemini 3.8 Flash judged every root cause.
+
+| Agent | Solved | Easy | Medium | Hard | App recovered | Declared resolved | Cost (36 runs, incl. judge) | Agent cost per solve |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Claude Sonnet 5.5 | **30/36** | 6/9 | 15/15 | 9/12 | 35/36 | 30/36 | $1.71 | $0.056 |
+| GPT-6.1 Terra | 20/36 | 7/9 | 12/15 | 1/12 | 36/36 | 20/36 | $0.59 | $0.029 |
+
+What stands out:
+
+- **Fixing is easy, saying so is hard.** The app recovered in 71 of 72 runs. Almost every failure is an agent that fixed the fault and then spent its remaining steps re-checking metrics that hadn't caught up, until it ran out of budget without declaring. Only one run in either sweep declared a wrong root cause.
+- **The hard tier separates the models.** Sonnet solved 9 of 12 hard faults, Terra 1. On `dns-namespace-filter` neither model ever declared, though Sonnet removed the bad CoreDNS line within its first six turns in every run.
+- **Terra is cheaper per episode, Sonnet is cheaper per answer.** Terra costs about a third as much per run, uses more steps (median 17 versus 12 on solved runs) and declares less often.
+- **Alert timing changes the score.** Without the 45-second hold (alerting the moment the symptom first appeared), Sonnet solved 34/36 and Terra 25/36. The hold leaves rate windows saturated with errors, so a correct fix takes longer to look like one. A realistic alert makes the benchmark harder, and the drop is almost all in declaring, not fixing.
+
+`kubebreaker report runs/sweeps/core` turns a sweep into an HTML page with a solve-rate versus cost chart, results by tier, and a fault-by-model matrix linking to every trace.
 
 ## Models
 
