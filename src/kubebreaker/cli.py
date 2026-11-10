@@ -16,6 +16,40 @@ def cmd_faults(_args) -> int:
     print("\ntwo faults at once (use 'multi' or an id in an experiment file):")
     for f in COMBOS.values():
         print(f"  {f.id}")
+    from kubebreaker.chaos import generated
+
+    found = generated.load_all()
+    if found:
+        print("\ngenerated (use 'generated' for the verified ones):")
+        for fid, (spec, f) in found.items():
+            state = "verified" if spec.get("verified") else "not yet selftested"
+            print(f"  {fid:<32} {f.tier:<7} {state}")
+    return 0
+
+
+def cmd_generate(args) -> int:
+    from kubebreaker.chaos import generate
+    from kubebreaker.pricing import cost_usd
+
+    out = generate.generate(args.count, Path(args.results) if args.results else None)
+    reply_path = Path("runs/generate-last-reply.yaml")
+    reply_path.parent.mkdir(parents=True, exist_ok=True)
+    reply_path.write_text(out.reply)
+    cost = cost_usd(out.model.split("/", 1)[1], out.usage) if out.usage else None
+    print(
+        f"{out.model}: {len(out.saved)} saved, {len(out.rejected)} rejected"
+        + (f", ${cost:.4f}" if cost is not None else "")
+    )
+    for path in out.saved:
+        shown = path.relative_to(Path.cwd()) if path.is_relative_to(Path.cwd()) else path
+        print(f"  saved    {shown}")
+    for sid, errors in out.rejected:
+        print(f"  rejected {sid}")
+        for e in errors:
+            print(f"           - {e}")
+    print(f"  raw reply in {reply_path}")
+    if out.saved:
+        print("\nNext: kubebreaker selftest <id> on the cluster marks a fault verified.")
     return 0
 
 
@@ -59,6 +93,8 @@ def cmd_verify(args) -> int:
 
 def cmd_selftest(args) -> int:
     k = Kube.from_env()
+    from kubebreaker.chaos import generated
+
     ids = args.faults or list(CATALOG)
     # "multi" expands to every two-fault combination
     ids = [c for i in ids for c in (COMBOS if i == "multi" else [i])]
@@ -74,6 +110,9 @@ def cmd_selftest(args) -> int:
         )
         for p in r.problems:
             print(f"        - {p}")
+        if r.ok and fault.id.startswith("gen-"):
+            generated.mark_verified(fault.id)
+            print("        verified: experiments can now use it")
         failed += not r.ok
     runner.reset_app(k)
     print(f"\n{len(faults) - failed}/{len(faults)} faults passed")
@@ -233,6 +272,11 @@ def main() -> None:
         "--memory", help="postmortem notes file (JSONL): shown to the agent, appended after"
     )
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("generate", help="ask a model for new fault specs (no cluster)")
+    p.add_argument("--count", type=int, default=5, help="how many faults to ask for")
+    p.add_argument("--results", help="a sweep folder: aim new faults at what agents failed")
+    p.set_defaults(func=cmd_generate)
 
     p = sub.add_parser("sweep", help="run an experiment file (resumable)")
     p.add_argument("experiment", help="path to an experiment YAML, e.g. experiments/core.yaml")

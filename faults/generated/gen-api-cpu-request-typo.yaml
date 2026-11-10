@@ -1,0 +1,37 @@
+id: gen-api-cpu-request-typo
+title: api container cpu request typo prevents scheduling
+tier: easy
+alert: 'KubeDeploymentRolloutStuck: deployment shop/api rollout is stuck and cannot progress'
+target: api
+ground_truth: deployment/api container cpu request was set to 50 cores instead of 50m, preventing new
+  pods from being scheduled
+expected_fix: change deployment/api spec.template.spec.containers[api].resources.requests.cpu back to
+  50m
+inject:
+- op: patch
+  kind: deployment
+  name: api
+  patch:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: api
+            resources:
+              requests:
+                cpu: '50'
+reference_fix:
+- op: patch
+  kind: deployment
+  name: api
+  patch:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: api
+            resources:
+              requests:
+                cpu: 50m
+verified: true
+generated_by: google/gemini-3.8-flash

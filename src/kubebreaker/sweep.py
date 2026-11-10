@@ -132,6 +132,13 @@ def resolve_faults(spec) -> list[str]:
     for item in spec:
         if item == Tier.MULTI:
             ids += list(COMBOS)
+        elif item == "generated":
+            from kubebreaker.chaos import generated
+
+            # Only specs that passed selftest on the cluster
+            ids += [i for i, (spec, _) in generated.load_all().items() if spec.get("verified")]
+        elif item.startswith("gen-"):
+            ids.append(item)
         elif item in tiers:
             ids += [f.id for f in CATALOG.values() if f.tier == item]
         elif item in CATALOG or item in COMBOS:

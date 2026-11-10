@@ -1,0 +1,32 @@
+id: gen-api-service-targetport-mismatch
+title: api service targetPort does not match container port
+tier: medium
+alert: 'HighErrorRate: frontend returns 500 Internal Server Error on user requests'
+ground_truth: service/api targetPort was changed to 8088 while the api container listens on 8080
+expected_fix: change service/api spec.ports[0].targetPort back to 8080
+inject:
+- op: patch
+  kind: service
+  name: api
+  patch:
+    spec:
+      ports:
+      - port: 8080
+        targetPort: 8088
+- op: restart
+  kind: deployment
+  name: frontend
+reference_fix:
+- op: patch
+  kind: service
+  name: api
+  patch:
+    spec:
+      ports:
+      - port: 8080
+        targetPort: 8080
+- op: restart
+  kind: deployment
+  name: frontend
+verified: true
+generated_by: google/gemini-3.8-flash
