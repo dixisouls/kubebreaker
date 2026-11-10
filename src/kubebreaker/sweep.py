@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 
 from kubebreaker import HARNESS_VERSION
-from kubebreaker.chaos import CATALOG, Tier, alerting, runner
+from kubebreaker.chaos import CATALOG, COMBOS, Tier, alerting, get_fault, runner
 from kubebreaker.episode import RUNS_DIR
 from kubebreaker.llm import Usage
 from kubebreaker.pricing import PRICES, cost_usd
@@ -122,9 +122,11 @@ def resolve_faults(spec) -> list[str]:
     ids: list[str] = []
     tiers = {t.value for t in Tier}
     for item in spec:
-        if item in tiers:
+        if item == Tier.MULTI:
+            ids += list(COMBOS)
+        elif item in tiers:
             ids += [f.id for f in CATALOG.values() if f.tier == item]
-        elif item in CATALOG:
+        elif item in CATALOG or item in COMBOS:
             ids.append(item)
         else:
             raise ValueError(f"unknown fault or tier {item!r}")
@@ -180,7 +182,12 @@ class History:
         return h
 
     def lookup(self, model: str, tier: str) -> tuple[dict[str, float], str]:
-        for key, source in (((model, tier), "history"), ((model, "*"), "history (all tiers)")):
+        keys = [((model, tier), "history")]
+        if tier == Tier.MULTI:
+            # No two-fault runs yet: the hard tier is the closest single-fault guide
+            keys.append(((model, Tier.HARD), "history (hard tier)"))
+        keys.append(((model, "*"), "history (all tiers)"))
+        for key, source in keys:
             if key in self.by_key:
                 return self.by_key[key], f"{source}, n={self.count[key]}"
         return FALLBACK, "no history: generic guess"
@@ -196,7 +203,7 @@ class Estimate:
 
 def estimate_job(job: Job, history: History) -> Estimate:
     c = job.config
-    base, source = history.lookup(c.model, CATALOG[job.fault_id].tier)
+    base, source = history.lookup(c.model, get_fault(job.fault_id).tier)
     # Episodes use about `steps` tool calls at a 20-call cap. Input grows faster than linearly
     # with steps (each turn re-sends the history), output roughly linearly.
     if c.max_steps < base["steps"]:
@@ -316,7 +323,7 @@ def run_sweep(exp: Experiment, max_cost: float | None = None, log=print) -> list
             llm = make_client(c.provider, c.model, effort=c.effort or None)
             r = run_episode(
                 admin,
-                CATALOG[job.fault_id],
+                get_fault(job.fault_id),
                 llm,
                 c.max_steps,
                 run_dir=run_dir,
