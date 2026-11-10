@@ -58,6 +58,8 @@ class Config:
     model: str
     max_steps: int = DEFAULT_STEPS
     effort: str = ""
+    # Keep postmortem notes (agent/memory.py) across this config's episodes
+    memory: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,12 @@ class Job:
 
     def run_dir(self, sweep: str) -> Path:
         return RUNS_DIR / "sweeps" / sweep / self.config.label / self.fault_id / f"r{self.repeat}"
+
+    def memory_path(self, sweep: str) -> Path | None:
+        """One postmortem store per config, shared by all its episodes in this sweep."""
+        if not self.config.memory:
+            return None
+        return RUNS_DIR / "sweeps" / sweep / self.config.label / "memory.jsonl"
 
 
 @dataclass
@@ -328,6 +336,7 @@ def run_sweep(exp: Experiment, max_cost: float | None = None, log=print) -> list
                 c.max_steps,
                 run_dir=run_dir,
                 alert_source=exp.alert_source,
+                memory=job.memory_path(exp.name),
             )
         except EpisodeAborted as exc:
             spent += exc.cost_usd

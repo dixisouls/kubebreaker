@@ -43,7 +43,7 @@ def test_agent_api_error_aborts_without_a_result(tmp_path, fake_cluster, monkeyp
     monkeypatch.setattr(
         episode,
         "run_agent",
-        lambda *a: outcome(
+        lambda *a, **kw: outcome(
             stop_reason="llm_error", error="PermissionDeniedError: credit balance too low"
         ),
     )
@@ -56,7 +56,7 @@ def test_agent_api_error_aborts_without_a_result(tmp_path, fake_cluster, monkeyp
 
 
 def test_judge_api_error_aborts_without_a_result(tmp_path, fake_cluster, monkeypatch):
-    monkeypatch.setattr(episode, "run_agent", lambda *a: outcome())
+    monkeypatch.setattr(episode, "run_agent", lambda *a, **kw: outcome())
 
     def broken_judge(*a):
         raise RuntimeError("overloaded")
@@ -70,7 +70,7 @@ def test_judge_api_error_aborts_without_a_result(tmp_path, fake_cluster, monkeyp
 
 def test_retry_keeps_the_failed_attempts_trace(tmp_path, fake_cluster, monkeypatch):
     (tmp_path / "trace.jsonl").write_text('{"kind": "old"}\n')
-    monkeypatch.setattr(episode, "run_agent", lambda *a: outcome(stop_reason="llm_error"))
+    monkeypatch.setattr(episode, "run_agent", lambda *a, **kw: outcome(stop_reason="llm_error"))
     with pytest.raises(episode.EpisodeAborted):
         episode.run_episode(None, FAULT, LLM, run_dir=tmp_path)
     assert "old" in (tmp_path / "trace.attempt-1.jsonl").read_text()
@@ -137,7 +137,7 @@ def test_episode_records_the_alert_hold(tmp_path, fake_cluster, monkeypatch):
         return 1.0
 
     monkeypatch.setattr(episode.runner, "inject", fake_inject)
-    monkeypatch.setattr(episode, "run_agent", lambda *a: outcome())
+    monkeypatch.setattr(episode, "run_agent", lambda *a, **kw: outcome())
     monkeypatch.setattr(
         episode,
         "judge_root_cause",
@@ -177,3 +177,38 @@ def test_time_estimate_follows_the_configured_hold(monkeypatch):
         return sweep.estimate_job(job, sweep.History()).seconds
 
     assert secs(90) - secs(0) == pytest.approx(90)
+
+
+@pytest.mark.parametrize(
+    ("declared", "remaining", "notes_after"),
+    [(True, [], 1), (False, [], 0), (True, ["frontend does not render"], 0)],
+)
+def test_memory_keeps_only_declared_and_verified_incidents(
+    tmp_path, fake_cluster, monkeypatch, declared, remaining, notes_after
+):
+    from kubebreaker.agent.memory import MemoryStore, Postmortem
+    from kubebreaker.scoring.judge import Judgement
+    from kubebreaker.scoring.score import FixScore
+
+    store = MemoryStore(tmp_path / "memory.jsonl")
+    store.add(Postmortem("HighErrorRate: old", "old cause", "old fix", 4))
+    seen = {}
+
+    def fake_agent(*a, memory="", **kw):
+        seen["memory"] = memory
+        return outcome(declared=declared)
+
+    monkeypatch.setenv("ALERT_HOLD_SECONDS", "0")
+    monkeypatch.setattr(episode.runner, "verify", lambda k, f, timeout: remaining)
+    monkeypatch.setattr(episode, "run_agent", fake_agent)
+    monkeypatch.setattr(
+        episode, "judge_root_cause", lambda *a: Judgement("wrong", 0.0, "", "google/g")
+    )
+    monkeypatch.setattr(episode, "score_fix", lambda *a: FixScore(1.0, "clean"))
+    r = episode.run_episode(None, FAULT, LLM, run_dir=tmp_path / "ep", memory=store.path)
+    assert "old cause" in seen["memory"] and r.memory_notes == 1
+    notes = store.load()
+    assert len(notes) == 1 + notes_after
+    if notes_after:
+        # The agent's own words, never the ground truth, even when the judge disagrees
+        assert notes[-1].root_cause == "rc" and notes[-1].alert == FAULT.alert
