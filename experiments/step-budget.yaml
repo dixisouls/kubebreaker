@@ -8,4 +8,4 @@ configs:
   - {label: terra-30, provider: openai, model: gpt-6.1-terra, max_steps: 30}
   - {label: sonnet-5, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 5}
   - {label: sonnet-10, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 10}
-  - {label: sonnet-30, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 30}
+# sonnet-30 left out to fit the Anthropic budget; terra-30 answers whether more steps help
