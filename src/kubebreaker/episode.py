@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from kubebreaker import HARNESS_VERSION
 from kubebreaker.agent.identity import agent_kube
 from kubebreaker.agent.loop import run_agent
 from kubebreaker.agent.tools import AgentTools
@@ -71,6 +72,8 @@ class EpisodeResult:
     # Seconds the symptom had to persist before the agent was alerted (0 in runs before this
     # setting existed); compare only runs with the same value
     alert_hold_seconds: int = 0
+    # kubebreaker.HARNESS_VERSION the episode ran under (1 for results without this field)
+    harness_version: int = 1
     error: str = ""
     run_dir: str = ""
 
@@ -190,6 +193,7 @@ def run_episode(
         ),
         max_steps=max_steps,
         alert_hold_seconds=hold,
+        harness_version=HARNESS_VERSION,
         effort=getattr(llm, "effort", None) or getattr(llm, "reasoning_effort", None) or "",
         fallback_turns=outcome.fallback_turns,
         served_by=outcome.served_by,

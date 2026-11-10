@@ -27,6 +27,7 @@ from pathlib import Path
 
 import yaml
 
+from kubebreaker import HARNESS_VERSION
 from kubebreaker.chaos import CATALOG, Tier, runner
 from kubebreaker.episode import RUNS_DIR
 from kubebreaker.llm import Usage
@@ -89,6 +90,20 @@ class Experiment:
     def pending(self) -> list[Job]:
         return [j for j in self.jobs() if not (j.run_dir(self.name) / "result.json").exists()]
 
+    def check_harness_version(self) -> None:
+        """Refuse to resume into a sweep holding results from another harness version:
+        they'd be skipped as done and mixed with new ones in the same comparison."""
+        found = set()
+        for f in (RUNS_DIR / "sweeps" / self.name).glob("*/*/r*/result.json"):
+            found.add(json.loads(f.read_text()).get("harness_version", 1))
+        old = sorted(v for v in found if v != HARNESS_VERSION)
+        if old:
+            versions = ", ".join(f"v{v}" for v in old)
+            raise ValueError(
+                f"runs/sweeps/{self.name} has results from harness {versions}, and this is "
+                f"v{HARNESS_VERSION}. Use --name to write this run to a new sweep folder."
+            )
+
 
 def resolve_faults(spec) -> list[str]:
     if spec in (None, "all"):
@@ -105,14 +120,15 @@ def resolve_faults(spec) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def load(path: str | Path) -> Experiment:
+def load(path: str | Path, name: str | None = None) -> Experiment:
+    """Read an experiment file. `name` overrides its name, which picks the results folder."""
     data = yaml.safe_load(Path(path).read_text())
     configs = [Config(**c) for c in data["configs"]]
     labels = [c.label for c in configs]
     if len(set(labels)) != len(labels):
         raise ValueError("config labels must be unique")
     return Experiment(
-        name=data["name"],
+        name=name or data["name"],
         repeats=int(data.get("repeats", 1)),
         fault_ids=resolve_faults(data.get("faults", "all")),
         configs=configs,

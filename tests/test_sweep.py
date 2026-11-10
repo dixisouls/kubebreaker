@@ -106,3 +106,37 @@ def test_estimate_scales_with_steps_and_effort(tmp_path):
     assert est(max_steps=10).cost_usd < base.cost_usd < est(max_steps=30).cost_usd
     assert est(effort="high").cost_usd > base.cost_usd
     assert "n=2" in base.source
+
+
+def _result(exp, job, version=None):
+    d = job.run_dir(exp.name)
+    d.mkdir(parents=True)
+    body = {} if version is None else {"harness_version": version}
+    (d / "result.json").write_text(json.dumps(body))
+
+
+def test_resuming_into_results_from_another_harness_version_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(sweep, "RUNS_DIR", tmp_path / "runs")
+    exp = write_exp(tmp_path, EXP)
+    _result(exp, exp.jobs()[0])  # no field: harness v1
+    with pytest.raises(ValueError, match="harness v1"):
+        exp.check_harness_version()
+
+
+def test_same_harness_version_resumes(tmp_path, monkeypatch):
+    monkeypatch.setattr(sweep, "RUNS_DIR", tmp_path / "runs")
+    exp = write_exp(tmp_path, EXP)
+    _result(exp, exp.jobs()[0], sweep.HARNESS_VERSION)
+    exp.check_harness_version()
+    assert len(exp.pending()) == len(exp.jobs()) - 1
+
+
+def test_name_override_picks_a_new_results_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(sweep, "RUNS_DIR", tmp_path / "runs")
+    p = tmp_path / "exp.yaml"
+    p.write_text(EXP)
+    old = sweep.load(p)
+    _result(old, old.jobs()[0])
+    new = sweep.load(p, name="t-v2")
+    new.check_harness_version()
+    assert new.name == "t-v2" and len(new.pending()) == len(new.jobs())

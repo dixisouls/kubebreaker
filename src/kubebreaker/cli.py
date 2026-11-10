@@ -117,7 +117,12 @@ def cmd_run(args) -> int:
 def cmd_sweep(args) -> int:
     from kubebreaker import sweep
 
-    exp = sweep.load(args.experiment)
+    exp = sweep.load(args.experiment, name=args.name)
+    try:
+        exp.check_harness_version()
+    except ValueError as exc:
+        print(f"error: {exc}")
+        return 1
     pending = exp.pending()
     done = len(exp.jobs()) - len(pending)
     plan, cost = sweep.summarize_plan(exp, pending, sweep.History.from_runs())
@@ -212,6 +217,7 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true", help="show the plan and estimate only")
     p.add_argument("--yes", action="store_true", help="don't ask for confirmation")
     p.add_argument("--max-cost", type=float, help="stop once actual spend reaches this many USD")
+    p.add_argument("--name", help="results folder under runs/sweeps (default: the file's name)")
     p.set_defaults(func=cmd_sweep)
 
     p = sub.add_parser("report", help="build an HTML report with charts from results")

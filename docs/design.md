@@ -118,6 +118,8 @@ Code: `src/kubebreaker/llm/` (provider adapters) and `src/kubebreaker/agent/` (t
 
 `get_resources`, `describe`, `get_logs`, `get_events`, `query_metrics`, `apply_patch` (strategic merge), `rollout` (status, restart, undo), `delete` (pods and NetworkPolicies only), `declare_resolved(root_cause, fix_summary)`.
 
+`get_logs` takes `since_seconds` so the agent can check whether errors continue after a fix. The system prompt and the `query_metrics` description both warn that old errors linger: logs keep pre-fix lines, and a rate over a window still counts earlier errors. In the first core sweep almost every failure was an agent that had fixed the fault, then kept re-checking a lagging 30s rate until it ran out of steps (harness v2).
+
 Allowed namespaces are `shop` and `kube-system`; RBAC is the final guard. Secret values are always redacted. Output is trimmed to 6,000 characters (head and tail kept).
 
 Every tool call carries a one-sentence `purpose` (what it checks or changes, and why), so traces read like an investigation log. An earlier version asked for the agent's "current hypothesis" on every call; Claude Sonnet 5.5's `reasoning_extraction` safeguard refused those requests outright, so the field asks for a purpose instead.
@@ -167,13 +169,14 @@ Code: `src/kubebreaker/sweep.py`, `src/kubebreaker/report.py`, `src/kubebreaker/
 - **Cost guard**: `--dry-run` prints the plan with an estimate; a real run asks for confirmation (unless `--yes`) and stops once actual spend reaches `--max-cost`.
 - **Estimates** come from the token usage of every past episode, by model and tier. Input tokens are scaled by (steps)^1.5 because each turn re-sends the history, output tokens linearly, and output by a rough effort multiplier. A 2x margin is printed alongside, since history is thin and repeat runs vary.
 - **Costs** per episode (agent and judge) are computed from `pricing.PRICES`, including cache reads and writes.
+- **Harness version**: `kubebreaker.HARNESS_VERSION` is stamped into every result and bumped whenever a change alters what the agent sees or can do. A sweep refuses to resume into a folder with results from another version; `--name` writes the run to a new folder (e.g. `sweep experiments/core.yaml --name core-v2`).
 - **Step cap is exact**: tool calls in a parallel batch beyond the budget get a "not run" result and aren't counted.
 
 | File | Configurations | Episodes |
 | --- | --- | --- |
 | `smoke.yaml` | terra, terra-high, sonnet, sonnet-high on one fault | 4 |
 | `core.yaml` | terra vs Sonnet 5.5 (medium), all faults, 3 repeats | 72 |
-| `step-budget.yaml` | both models at 5, 10 and 30 steps | 216 |
+| `step-budget.yaml` | terra at 5, 10 and 30 steps, Sonnet 5.5 at 5 and 10 | 180 |
 | `effort.yaml` | Sonnet low/high, terra medium/high | 144 |
 
 **Report**: `kubebreaker report <dir>` writes one self-contained HTML page: a configuration table, solve rate vs cost (scatter), solve rate by tier (grouped columns), solve rate vs step budget (when budgets vary), a fault × configuration matrix, and every episode in a table. "Solved" means resolved and the root cause judged correct. Colors come from a categorical palette validated for colour-vision deficiency in light and dark mode; every charted value is also in a table.
