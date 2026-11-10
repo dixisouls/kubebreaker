@@ -8,4 +8,4 @@ configs:
   - {label: terra-30, provider: openai, model: gpt-6.1-terra, max_steps: 30}
   - {label: sonnet-5, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 5}
   - {label: sonnet-10, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 10}
-# sonnet-30 ran later on harness v2, in experiments/sonnet-30.yaml
+# Ran on harness v1 without sonnet-30; experiments/step-budget-v2.yaml is the full v2 rerun

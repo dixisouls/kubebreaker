@@ -1,8 +1,0 @@
-# Sonnet with 30 steps on the current harness. Compare with Sonnet in core-v2 (20 steps, same
-# harness): do the extra steps still help once agents are told about metric lag?
-# Runs on its own folder because the step-budget sweep used an earlier harness version.
-name: sonnet-30
-repeats: 3
-faults: all
-configs:
-  - {label: sonnet-30, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 30}
