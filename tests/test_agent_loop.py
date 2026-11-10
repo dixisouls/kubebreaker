@@ -181,3 +181,42 @@ def test_parallel_calls_cannot_exceed_the_step_cap():
     assert out.steps == 6 and len(tools.calls) == 6 and out.stop_reason == "max_steps"
     # the last two calls of the second batch got a result but weren't executed or counted
     assert [e["kind"] for e in trace.events].count("over_budget") == 2
+
+
+def _log_tools(logs: str):
+    from types import SimpleNamespace as NS
+
+    from kubebreaker.agent.tools import AgentTools
+
+    calls = []
+
+    def read_namespaced_pod_log(pod, ns, **kwargs):
+        calls.append(kwargs)
+        return logs
+
+    tools = AgentTools.__new__(AgentTools)  # no cluster: only the log client is faked
+    tools.k = NS(core=NS(read_namespaced_pod_log=read_namespaced_pod_log))
+    return tools, calls
+
+
+def test_get_logs_since_seconds_is_passed_and_capped():
+    tools, calls = _log_tools("line\n")
+    tools.get_logs({"pod": "api-1", "since_seconds": 30})
+    tools.get_logs({"pod": "api-1", "since_seconds": 99999})
+    tools.get_logs({"pod": "api-1"})
+    assert calls[0]["since_seconds"] == 30
+    assert calls[1]["since_seconds"] == 3600
+    assert "since_seconds" not in calls[2]
+
+
+def test_get_logs_says_when_nothing_was_logged_recently():
+    tools, _ = _log_tools("")
+    assert tools.get_logs({"pod": "api-1", "since_seconds": 20}) == (
+        "(no log output in the last 20s)"
+    )
+    assert tools.get_logs({"pod": "api-1"}) == "(no log output)"
+
+
+def test_get_logs_spec_offers_since_seconds():
+    spec = next(s for s in SPECS if s.name == "get_logs")
+    assert "since_seconds" in spec.parameters["properties"]

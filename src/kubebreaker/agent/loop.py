@@ -19,6 +19,9 @@ How to work:
   or deleting pods repeatedly, removing resource limits, or changing unrelated objects.
 - After a change, verify the app is healthy again (rollouts complete, endpoints ready,
   errors gone). Changes can take a few seconds to settle.
+- Old errors linger: logs keep lines from before your fix, and a metric rate over a window
+  still counts errors from earlier in that window. Judge recovery by what happened after the
+  change (get_logs with since_seconds, a short metric window, endpoint and rollout state).
 - When it's fixed and verified, call declare_resolved with a specific root cause (which object,
   what was wrong) and what you changed.
 

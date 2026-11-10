@@ -44,6 +44,7 @@ PATCH_KINDS = ["deployment", "service", "configmap", "networkpolicy"]
 DELETE_KINDS = ["pod", "networkpolicy"]
 MAX_OUTPUT_CHARS = 6000
 MAX_LOG_LINES = 300
+MAX_LOG_SINCE_SECONDS = 3600
 FINAL_TOOL = "declare_resolved"
 
 
@@ -189,6 +190,13 @@ SPECS = [
                 "type": "boolean",
                 "description": "Logs of the previous (crashed) container, not the current one.",
             },
+            "since_seconds": {
+                "type": "integer",
+                "description": (
+                    f"Only lines from the last N seconds (max {MAX_LOG_SINCE_SECONDS}), "
+                    "e.g. to see whether errors continue after a fix."
+                ),
+            },
         },
         ["pod"],
     ),
@@ -207,7 +215,9 @@ SPECS = [
         "kube_pod_container_status_last_terminated_reason, "
         "kube_deployment_status_replicas_available, ...), and cAdvisor "
         "(container_cpu_usage_seconds_total, container_cpu_cfs_throttled_periods_total, "
-        "container_memory_working_set_bytes).",
+        "container_memory_working_set_bytes). Prometheus scrapes every 15s, so rate() over "
+        "[1m] still counts errors from up to a minute ago; after a fix, use a window shorter "
+        "than the time since the change, or check directly.",
         {"promql": _str("PromQL expression.")},
         ["promql"],
     ),
@@ -457,9 +467,15 @@ class AgentTools:
     def get_logs(self, args: dict) -> str:
         ns, pod = self._ns(args), self._name(args, "pod")
         lines = max(1, min(int(args.get("tail_lines") or 100), MAX_LOG_LINES))
+        kwargs = {}
+        if args.get("since_seconds"):
+            since = int(args["since_seconds"])
+            kwargs["since_seconds"] = max(1, min(since, MAX_LOG_SINCE_SECONDS))
         logs = self.k.core.read_namespaced_pod_log(
-            pod, ns, tail_lines=lines, previous=bool(args.get("previous", False))
+            pod, ns, tail_lines=lines, previous=bool(args.get("previous", False)), **kwargs
         )
+        if not logs and kwargs:
+            return f"(no log output in the last {kwargs['since_seconds']}s)"
         return logs or "(no log output)"
 
     def _events(self, ns: str, field_selector: str | None = None, limit: int = 40) -> str:
