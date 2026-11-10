@@ -1,0 +1,10 @@
+# Postmortem memory (agent/memory.py): each config keeps the notes its agent wrote after every
+# incident it closed, and sees the newest 12 at the next alert. Repeat 1 shows whether notes
+# about other faults help; repeats 2 and 3 whether notes about the same fault do.
+# Compare with core-v2: same harness, same faults, no memory.
+name: memory
+repeats: 3
+faults: all
+configs:
+  - {label: terra-memory, provider: openai, model: gpt-6.1-terra, memory: true}
+  - {label: sonnet-memory, provider: anthropic, model: claude-sonnet-5-5, effort: medium, memory: true}

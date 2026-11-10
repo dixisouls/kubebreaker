@@ -95,6 +95,7 @@ def cmd_run(args) -> int:
             args.max_steps,
             args.max_tokens,
             alert_source=args.alert_source,
+            memory=Path(args.memory) if args.memory else None,
         )
     except EpisodeAborted as exc:
         print(f"\nABORTED, not a result: {exc}  (spent ${exc.cost_usd:.3f})")
@@ -227,6 +228,9 @@ def main() -> None:
         "--alert-source",
         choices=["hold", "alertmanager"],
         help="page the agent after a symptom hold (default) or from Alertmanager",
+    )
+    p.add_argument(
+        "--memory", help="postmortem notes file (JSONL): shown to the agent, appended after"
     )
     p.set_defaults(func=cmd_run)
 

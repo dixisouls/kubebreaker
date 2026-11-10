@@ -86,7 +86,9 @@ def run_agent(
     max_steps: int = 20,
     max_tokens: int = 600_000,
     final_tool: str = "declare_resolved",
+    memory: str = "",
 ) -> AgentOutcome:
+    """`memory` is appended to the system prompt (agent/memory.py prompt_block)."""
     out = AgentOutcome()
     start = time.monotonic()
     messages = [Message("user", alert_message(alert, max_steps))]
@@ -103,7 +105,7 @@ def run_agent(
             break
 
         try:
-            resp = llm.chat(SYSTEM_PROMPT, messages, tools.specs)
+            resp = llm.chat(SYSTEM_PROMPT + memory, messages, tools.specs)
         except Exception as exc:
             out.stop_reason, out.error = "llm_error", f"{type(exc).__name__}: {exc}"
             trace.log("llm_error", error=out.error)

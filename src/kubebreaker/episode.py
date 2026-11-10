@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kubebreaker import HARNESS_VERSION
+from kubebreaker.agent import memory as postmortems
 from kubebreaker.agent.identity import agent_kube
 from kubebreaker.agent.loop import run_agent
 from kubebreaker.agent.tools import AgentTools
@@ -78,6 +79,8 @@ class EpisodeResult:
     alert_source: str = "hold"
     # The alert text the agent received
     alert: str = ""
+    # Postmortem notes shown to the agent (0 when memory is off or empty)
+    memory_notes: int = 0
     error: str = ""
     run_dir: str = ""
 
@@ -140,7 +143,10 @@ def run_episode(
     max_tokens: int = 600_000,
     run_dir: Path | None = None,
     alert_source: str | None = None,
+    memory: Path | None = None,
 ) -> EpisodeResult:
+    """`memory` is a postmortem store (agent/memory.py): its notes are shown to the agent, and
+    the agent's write-up is added to it if the agent declared and the app recovered."""
     run_dir = run_dir or new_run_dir(fault.id)
     trace_path = run_dir / "trace.jsonl"
     if trace_path.exists():
@@ -161,9 +167,16 @@ def run_episode(
         trace.log("injected", fault=fault.id, symptom_seconds=round(symptom_s, 1), alert_hold=hold)
         alert = fault.alert
 
+    store = postmortems.MemoryStore(memory) if memory else None
+    notes = postmortems.select(store.load()) if store else []
+    if store:
+        trace.log("memory", notes=len(notes), store=str(memory))
+
     tools = AgentTools(agent_kube(admin))
     alert_at = time.monotonic()
-    outcome = run_agent(llm, tools, alert, trace, max_steps, max_tokens)
+    outcome = run_agent(
+        llm, tools, alert, trace, max_steps, max_tokens, memory=postmortems.prompt_block(notes)
+    )
     agent_cost = cost_usd(llm.model, outcome.usage) or 0.0
     if outcome.stop_reason == "llm_error":
         raise _abort(run_dir, trace, "agent", outcome.error, agent_cost)
@@ -228,6 +241,7 @@ def run_episode(
         harness_version=HARNESS_VERSION,
         alert_source=source,
         alert=alert,
+        memory_notes=len(notes),
         effort=getattr(llm, "effort", None) or getattr(llm, "reasoning_effort", None) or "",
         fallback_turns=outcome.fallback_turns,
         served_by=outcome.served_by,
@@ -235,4 +249,9 @@ def run_episode(
         run_dir=str(run_dir),
     )
     (run_dir / "result.json").write_text(json.dumps(asdict(result), indent=2))
+    # Written after result.json, so an episode retried after an abort never adds a note twice
+    if store and resolved and outcome.declared:
+        store.add(
+            postmortems.Postmortem(alert, outcome.root_cause, outcome.fix_summary, outcome.steps)
+        )
     return result

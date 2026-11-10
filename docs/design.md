@@ -87,6 +87,10 @@ The agent is alerted only after the fault's symptom has held without a break for
 
 Combinations are tier `multi` and live in `COMBOS`, not `CATALOG`, so `faults: all` still means the 12 single faults. `experiments/multi.yaml` runs them with a 30-step budget. `kubebreaker selftest multi` checks them on the cluster.
 
+## Postmortem memory
+
+`agent/memory.py`. With `memory: true` on a sweep config (or `run --memory FILE`), every episode where the agent declared the incident resolved and the harness confirmed recovery appends a note to `runs/sweeps/<name>/<label>/memory.jsonl`: the alert, and the agent's own root cause and fix. The next episode's system prompt lists the newest 12 notes (6,000 characters at most) and says a note's root cause may be wrong. The ground truth and the judge's verdict are never stored, so memory can carry mistakes forward as well as successes. Results record `memory_notes`, the number of notes shown. `experiments/memory.yaml` runs the core faults with memory; compare it with `core-v2`. Repeat 1 shows whether notes about other faults help, repeats 2 and 3 whether notes about the same fault do.
+
 ## Runtime layout
 
 - `kind` and `kubectl` run on the host. kind is never run inside a container.
