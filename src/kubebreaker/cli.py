@@ -6,19 +6,22 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from kubebreaker.chaos import CATALOG, runner
+from kubebreaker.chaos import CATALOG, COMBOS, get_fault, runner
 from kubebreaker.kube import Kube
 
 
 def cmd_faults(_args) -> int:
     for f in CATALOG.values():
         print(f"{f.id:<20} {f.tier:<7} {f.title}")
+    print("\ntwo faults at once (use 'multi' or an id in an experiment file):")
+    for f in COMBOS.values():
+        print(f"  {f.id}")
     return 0
 
 
 def _fault(fault_id: str):
     try:
-        return CATALOG[fault_id]
+        return get_fault(fault_id)
     except KeyError:
         sys.exit(f"unknown fault {fault_id!r}. Run 'kubebreaker faults' to list them.")
 
@@ -56,7 +59,10 @@ def cmd_verify(args) -> int:
 
 def cmd_selftest(args) -> int:
     k = Kube.from_env()
-    faults = [_fault(i) for i in args.faults] if args.faults else list(CATALOG.values())
+    ids = args.faults or list(CATALOG)
+    # "multi" expands to every two-fault combination
+    ids = [c for i in ids for c in (COMBOS if i == "multi" else [i])]
+    faults = [_fault(i) for i in ids]
     failed = 0
     for fault in faults:
         r = runner.selftest(k, fault)

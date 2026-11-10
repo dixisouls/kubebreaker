@@ -1,0 +1,8 @@
+# Two faults at once (chaos/combos.py): does the agent notice it isn't done after the first fix?
+# Two faults need more steps than one, so the budget is 30.
+name: multi
+repeats: 3
+faults: [multi]
+configs:
+  - {label: terra, provider: openai, model: gpt-6.1-terra, max_steps: 30}
+  - {label: sonnet, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 30}

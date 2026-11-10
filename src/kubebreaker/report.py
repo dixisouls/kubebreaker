@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-TIERS = ["easy", "medium", "hard"]
+TIERS = ["easy", "medium", "hard", "multi"]
 # Categorical slots, fixed order (light, dark). Validated adjacent-pair CVD-safe in both modes;
 # the first three are also safe all-pairs, which is what the scatter uses.
 SERIES = [
@@ -205,13 +205,15 @@ def scatter(configs: dict[str, list[Row]], model_slot: dict[str, int]) -> str:
 def tier_bars(configs: dict[str, list[Row]], slots: dict[str, int]) -> str:
     """Grouped columns: solve rate per tier, one column per configuration."""
     labels = list(configs)
+    present = {r.tier for rows in configs.values() for r in rows}
+    tiers = [t for t in TIERS if t in present]
     y0, y1 = H - PAD_B, PAD_T
     x0, x1 = PAD_L, W - 24
-    band = (x1 - x0) / len(TIERS)
+    band = (x1 - x0) / max(1, len(tiers))
     bar = min(24, (band * 0.8 - 2 * (len(labels) - 1)) / max(1, len(labels)))
     group = len(labels) * bar + 2 * (len(labels) - 1)
     body = [y_axis([(v / 100, f"{v}%") for v in (0, 25, 50, 75, 100)], y0, y1, 1.0)]
-    for t_i, tier in enumerate(TIERS):
+    for t_i, tier in enumerate(tiers):
         start = x0 + band * t_i + (band - group) / 2
         body.append(
             f'<text class="tick" x="{x0 + band * (t_i + 0.5):.1f}" y="{y0 + 18}" '
@@ -506,7 +508,7 @@ def build(root: Path, title: str = "kubebreaker results") -> str:
         + "</div>"
     )
     tier_card = (
-        '<div class="card"><h2>Solve rate by tier</h2><p class="sub">Easy, medium and hard faults.</p>'
+        '<div class="card"><h2>Solve rate by tier</h2><p class="sub">One group per fault tier.</p>'
         + legend([(label, slots[label]) for label in configs])
         + tier_bars(configs, slots)
         + "</div>"

@@ -12,6 +12,8 @@ class Tier(StrEnum):
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
+    # Two faults at once (chaos/combos.py)
+    MULTI = "multi"
 
 
 @dataclass(frozen=True)

@@ -74,6 +74,19 @@ The agent is alerted only after the fault's symptom has held without a break for
 
 **Alertmanager paging** (opt-in: `alert_source: alertmanager` in an experiment file, `--alert-source alertmanager` on `run`, or `ALERT_SOURCE`). `cluster/monitoring/alerting.yaml` defines four Prometheus rules, one per alert name the catalog uses (`HighErrorRate`, `HighLatency`, `KubePodCrashLooping`, `KubeDeploymentRolloutStuck`), each with `for: 45s`, plus an Alertmanager with no receivers. The harness waits until none of the fault's alerts is firing, injects the fault, waits for Alertmanager to report every alert named in the fault's alert text with a start time after injection, and sends the agent the rules' descriptions. Results record `alert_source` and the exact `alert` text, and a sweep won't mix alert sources in one folder. Apply the rules to an existing cluster with `make alerting`.
 
+## Two faults at once
+
+`chaos/combos.py` builds incidents from two catalog faults: both are injected, every distinct alert is sent, and the incident is resolved only when both parts' checks pass. Fix scopes are merged, so fixing both is never collateral, and the judge's ground truth says naming only one cause is partial. Pairs touch different objects and are chosen so fixing the louder fault leaves the app broken:
+
+| Combination | What makes it hard |
+| --- | --- |
+| `scaled-to-zero+wrong-db-host` | the api outage hides the orders database misconfiguration |
+| `oom-killed+netpol-block` | once orders stops crash-looping, a NetworkPolicy still cuts it off |
+| `bad-image-tag+redis-oom` | a stuck rollout alert next to an unrelated Redis failure |
+| `missing-secret-ref+cpu-starvation` | a rollout alert and a latency alert, neither explaining the other |
+
+Combinations are tier `multi` and live in `COMBOS`, not `CATALOG`, so `faults: all` still means the 12 single faults. `experiments/multi.yaml` runs them with a 30-step budget. `kubebreaker selftest multi` checks them on the cluster.
+
 ## Runtime layout
 
 - `kind` and `kubectl` run on the host. kind is never run inside a container.
