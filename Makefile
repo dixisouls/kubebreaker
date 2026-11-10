@@ -4,8 +4,9 @@ CALICO_VERSION := v3.33.0
 CALICO_URL     := https://raw.githubusercontent.com/projectcalico/calico/$(CALICO_VERSION)/manifests/calico.yaml
 KUBECTL        := kubectl --context $(CONTEXT)
 APP_IMAGE      := kubebreaker/shop:0.1.0
+HARNESS_IMAGE  := kubebreaker/harness:dev
 
-.PHONY: help cluster-up cluster-down cni monitoring status prometheus app-build app-load app-reset app-verify shop test selftest require-context
+.PHONY: help cluster-up cluster-down cni monitoring status prometheus app-build app-load app-reset app-verify shop test selftest harness-image harness require-context
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -59,6 +60,17 @@ test: ## Run unit tests (no cluster needed)
 
 selftest: require-context ## Inject every fault, apply its reference fix, verify recovery
 	uv run kubebreaker selftest
+
+harness-image: ## Build the harness container image
+	docker build -t $(HARNESS_IMAGE) .
+
+harness: harness-image ## Run the CLI in a container, e.g. make harness ARGS="run wrong-db-host"
+	@mkdir -p runs
+	@kind get kubeconfig --internal --name $(CLUSTER) > runs/.kubeconfig-internal
+	docker run --rm -i --network kind --user $$(id -u):$$(id -g) --env-file .env \
+		-v "$(CURDIR)/runs/.kubeconfig-internal:/kube/config:ro" \
+		-v "$(CURDIR)/runs:/kubebreaker/runs" \
+		$(HARNESS_IMAGE) $(ARGS)
 
 require-context:
 	@scripts/require-context.sh
