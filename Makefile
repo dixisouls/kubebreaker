@@ -6,7 +6,7 @@ KUBECTL        := kubectl --context $(CONTEXT)
 APP_IMAGE      := kubebreaker/shop:0.1.0
 HARNESS_IMAGE  := kubebreaker/harness:dev
 
-.PHONY: help cluster-up cluster-down cni monitoring status prometheus app-build app-load app-reset app-verify shop test selftest harness-image harness require-context
+.PHONY: help cluster-up cluster-down cni monitoring alerting status prometheus app-build app-load app-reset app-verify shop test selftest harness-image harness require-context
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -28,9 +28,17 @@ cni: require-context ## Install Calico
 	$(KUBECTL) -n kube-system rollout status daemonset/calico-node --timeout=300s
 	$(KUBECTL) wait --for=condition=Ready nodes --all --timeout=180s
 
-monitoring: require-context ## Install Prometheus and kube-state-metrics
-	$(KUBECTL) apply -f cluster/monitoring/prometheus.yaml -f cluster/monitoring/kube-state-metrics.yaml
+monitoring: require-context ## Install Prometheus, kube-state-metrics and Alertmanager
+	$(KUBECTL) apply -f cluster/monitoring/prometheus.yaml -f cluster/monitoring/kube-state-metrics.yaml \
+		-f cluster/monitoring/alerting.yaml
 	$(KUBECTL) -n monitoring rollout status deployment/kube-state-metrics --timeout=180s
+	$(KUBECTL) -n monitoring rollout status deployment/alertmanager --timeout=180s
+	$(KUBECTL) -n monitoring rollout status deployment/prometheus --timeout=180s
+
+alerting: require-context ## Apply alert rules and Alertmanager, then restart Prometheus to load them
+	$(KUBECTL) apply -f cluster/monitoring/prometheus.yaml -f cluster/monitoring/alerting.yaml
+	$(KUBECTL) -n monitoring rollout status deployment/alertmanager --timeout=180s
+	$(KUBECTL) -n monitoring rollout restart deployment/prometheus
 	$(KUBECTL) -n monitoring rollout status deployment/prometheus --timeout=180s
 
 status: require-context ## Show nodes and pods

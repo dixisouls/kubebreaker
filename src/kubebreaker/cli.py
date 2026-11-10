@@ -82,7 +82,14 @@ def cmd_run(args) -> int:
     llm = make_client(args.provider, args.model, effort=args.effort)
     print(f"episode: {fault.id} with {llm.provider}/{llm.model} (max {args.max_steps} steps)")
     try:
-        r = run_episode(Kube.from_env(), fault, llm, args.max_steps, args.max_tokens)
+        r = run_episode(
+            Kube.from_env(),
+            fault,
+            llm,
+            args.max_steps,
+            args.max_tokens,
+            alert_source=args.alert_source,
+        )
     except EpisodeAborted as exc:
         print(f"\nABORTED, not a result: {exc}  (spent ${exc.cost_usd:.3f})")
         return 2
@@ -210,6 +217,11 @@ def main() -> None:
     p.add_argument("--max-steps", type=int, default=20)
     p.add_argument("--max-tokens", type=int, default=600_000)
     p.add_argument("--effort", help="reasoning effort: low, medium, high (default: per provider)")
+    p.add_argument(
+        "--alert-source",
+        choices=["hold", "alertmanager"],
+        help="page the agent after a symptom hold (default) or from Alertmanager",
+    )
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("sweep", help="run an experiment file (resumable)")
