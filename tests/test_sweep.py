@@ -149,7 +149,7 @@ def test_resuming_with_another_alert_source_is_refused(tmp_path, monkeypatch):
     _result(exp, exp.jobs()[0], sweep.HARNESS_VERSION)  # no alert_source: hold
     am = write_exp(tmp_path, EXP + "alert_source: alertmanager\n")
     assert am.alert_source == "alertmanager"
-    with pytest.raises(ValueError, match="paged by hold"):
+    with pytest.raises(ValueError, match="hold, now alertmanager"):
         am.check_harness_version()
 
 
@@ -171,3 +171,29 @@ configs:
     assert {j.fault_id for j in jobs if j.config.label == "a"} == {"wrong-db-host"}
     assert {j.fault_id for j in jobs if j.config.label == "b"} == set(COMBOS)
     assert len(jobs) == 2 * (1 + len(COMBOS))
+
+
+def test_a_config_can_be_paged_by_alertmanager(tmp_path, monkeypatch):
+    monkeypatch.setattr(sweep, "RUNS_DIR", tmp_path / "runs")
+    exp = write_exp(
+        tmp_path,
+        """
+name: mixed
+repeats: 1
+faults: [wrong-db-host]
+configs:
+  - {label: a, provider: openai, model: gpt-6.1-terra}
+  - {label: b, provider: openai, model: gpt-6.1-terra, alert_source: alertmanager}
+""",
+    )
+    assert [exp.source_for(c) for c in exp.configs] == ["hold", "alertmanager"]
+    for label, source in [("a", "hold"), ("b", "alertmanager")]:
+        d = tmp_path / "runs" / "sweeps" / "mixed" / label / "wrong-db-host" / "r1"
+        d.mkdir(parents=True)
+        result = {"harness_version": sweep.HARNESS_VERSION, "alert_source": source}
+        (d / "result.json").write_text(json.dumps(result))
+    exp.check_harness_version()  # each config matches its own source
+    bad = tmp_path / "runs" / "sweeps" / "mixed" / "a" / "wrong-db-host" / "r1" / "result.json"
+    bad.write_text(json.dumps({"harness_version": sweep.HARNESS_VERSION, "alert_source": "x"}))
+    with pytest.raises(ValueError, match="paged another way"):
+        exp.check_harness_version()

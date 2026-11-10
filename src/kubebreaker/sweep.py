@@ -51,6 +51,11 @@ FALLBACK = {
 }
 
 
+# Paging from Alertmanager waits for the last episode's alerts to clear, then for the rules'
+# `for: 45s` and evaluation interval, on top of the usual symptom wait
+ALERTMANAGER_WAIT_SECONDS = 90
+
+
 @dataclass(frozen=True)
 class Config:
     label: str
@@ -62,6 +67,8 @@ class Config:
     memory: bool = False
     # Faults for this config only (resolved ids); empty means the experiment's faults
     faults: tuple[str, ...] = ()
+    # How this config's episodes page the agent; empty means the experiment's alert_source
+    alert_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,17 +106,24 @@ class Experiment:
             for f in (c.faults or self.fault_ids)
         ]
 
+    def source_for(self, config: Config) -> str:
+        return config.alert_source or self.alert_source
+
     def pending(self) -> list[Job]:
         return [j for j in self.jobs() if not (j.run_dir(self.name) / "result.json").exists()]
 
     def check_harness_version(self) -> None:
         """Refuse to resume into a sweep holding results from another harness version or
         alert source: they'd be skipped as done and mixed with new ones in one comparison."""
-        versions, sources = set(), set()
+        versions, mixed = set(), set()
+        expected = {c.label: self.source_for(c) for c in self.configs}
         for f in (RUNS_DIR / "sweeps" / self.name).glob("*/*/r*/result.json"):
             r = json.loads(f.read_text())
             versions.add(r.get("harness_version", 1))
-            sources.add(r.get("alert_source", "hold"))
+            label = f.relative_to(RUNS_DIR / "sweeps" / self.name).parts[0]
+            source = r.get("alert_source", "hold")
+            if label in expected and source != expected[label]:
+                mixed.add(f"{label} ({source}, now {expected[label]})")
         hint = "Use --name to write this run to a new sweep folder."
         old = sorted(v for v in versions if v != HARNESS_VERSION)
         if old:
@@ -118,11 +132,10 @@ class Experiment:
                 f"runs/sweeps/{self.name} has results from harness {found}, and this is "
                 f"v{HARNESS_VERSION}. {hint}"
             )
-        other = sorted(sources - {self.alert_source})
-        if other:
+        if mixed:
             raise ValueError(
-                f"runs/sweeps/{self.name} has results paged by {', '.join(other)}, and this "
-                f"run uses {self.alert_source}. {hint}"
+                f"runs/sweeps/{self.name} has results paged another way for "
+                f"{', '.join(sorted(mixed))}. {hint}"
             )
 
 
@@ -160,6 +173,8 @@ def load(path: str | Path, name: str | None = None) -> Experiment:
             c["faults"] = tuple(resolve_faults(c["faults"]))
             if not c["faults"]:
                 raise ValueError(f"config {c.get('label')!r} has no faults")
+        if c.get("alert_source"):
+            c["alert_source"] = alerting.alert_source(c["alert_source"])
         configs.append(Config(**c))
     labels = [c.label for c in configs]
     if len(set(labels)) != len(labels):
@@ -247,6 +262,7 @@ def estimate_job(job: Job, history: History) -> Estimate:
     cost = cost_usd(c.model, usage)
     seconds = (
         OVERHEAD_SECONDS
+        + (ALERTMANAGER_WAIT_SECONDS if c.alert_source == "alertmanager" else 0)
         + runner.alert_hold_seconds()
         + base["agent_seconds"] * scale * (0.5 + effort / 2)
     )
@@ -257,10 +273,11 @@ def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[
     """A printable plan with cost and time per config, and the total estimated cost."""
     faults = {f for c in exp.configs for f in (c.faults or exp.fault_ids)}
     lines = [f"experiment: {exp.name}  ({len(faults)} faults x {exp.repeats} repeats)"]
-    if exp.alert_source != "hold":
-        lines[0] += f"  paged by {exp.alert_source}"
+    paged = sorted({exp.source_for(c) for c in exp.configs} - {"hold"})
+    if paged:
+        lines[0] += f"  (some configs paged by {', '.join(paged)})"
     header = (
-        f"  {'config':<18}{'model':<20}{'steps':>6}{'effort':>8}{'jobs':>6}"
+        f"  {'config':<21}{'model':<20}{'steps':>6}{'effort':>8}{'jobs':>6}"
         f"{'est. cost':>11}{'est. time':>11}  basis"
     )
     lines.append(header)
@@ -278,12 +295,12 @@ def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[
         if not all(e.priced for e in ests):
             unpriced.add(c.model)
         lines.append(
-            f"  {c.label:<18}{c.model:<20}{c.max_steps:>6}{c.effort or '-':>8}{len(mine):>6}"
+            f"  {c.label:<21}{c.model:<20}{c.max_steps:>6}{c.effort or '-':>8}{len(mine):>6}"
             f"{'$' + format(cost, '.2f'):>11}{secs / 3600:>10.1f}h  {_basis(history, c.model)}"
         )
     judge = len(jobs) * judge_cost_estimate()
     lines.append(
-        f"  {'judge':<18}{'':<20}{'':>6}{'':>8}{len(jobs):>6}{'$' + format(judge, '.2f'):>11}"
+        f"  {'judge':<21}{'':<20}{'':>6}{'':>8}{len(jobs):>6}{'$' + format(judge, '.2f'):>11}"
     )
     total_cost += judge
     lines.append(
@@ -352,7 +369,7 @@ def run_sweep(exp: Experiment, max_cost: float | None = None, log=print) -> list
                 llm,
                 c.max_steps,
                 run_dir=run_dir,
-                alert_source=exp.alert_source,
+                alert_source=exp.source_for(c),
                 memory=job.memory_path(exp.name),
             )
         except EpisodeAborted as exc:

@@ -5,6 +5,8 @@
 #   multi        two faults at once (chaos/combos.py), 30 steps
 #   memory       postmortem notes kept across the config's episodes (agent/memory.py)
 #   generated    faults Gemini proposed that passed selftest on the cluster
+#   alertmanager both models, 20 steps, paged by real Prometheus alerts instead of the hold
+#                (run `kubebreaker selftest --alerts` first: every fault must raise its alert)
 name: full-v2
 repeats: 3
 faults: all
@@ -23,3 +25,5 @@ configs:
   - {label: sonnet-memory, provider: anthropic, model: claude-sonnet-5-5, effort: medium, memory: true}
   - {label: terra-generated, provider: openai, model: gpt-6.1-terra, faults: [generated]}
   - {label: sonnet-generated, provider: anthropic, model: claude-sonnet-5-5, effort: medium, faults: [generated]}
+  - {label: terra-alertmanager, provider: openai, model: gpt-6.1-terra, alert_source: alertmanager}
+  - {label: sonnet-alertmanager, provider: anthropic, model: claude-sonnet-5-5, effort: medium, alert_source: alertmanager}
