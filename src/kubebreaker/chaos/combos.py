@@ -73,7 +73,11 @@ register_combo("missing-secret-ref", "cpu-starvation")
 
 
 def get_fault(fault_id: str) -> Fault:
-    """A single fault or a combination, by id. Raises KeyError for unknown ids."""
+    """A catalog fault, a combination or a generated fault, by id. KeyError if unknown."""
     if fault_id in CATALOG:
         return CATALOG[fault_id]
-    return COMBOS[fault_id]
+    if fault_id in COMBOS:
+        return COMBOS[fault_id]
+    from kubebreaker.chaos import generated
+
+    return generated.load_all()[fault_id][1]

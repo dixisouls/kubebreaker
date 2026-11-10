@@ -1,0 +1,27 @@
+id: gen-api-service-targetport
+title: API Service targetPort does not match container listening port
+tier: medium
+alert: 'HighErrorRate: Frontend requests are failing with HTTP 502 Bad Gateway'
+ground_truth: Service api spec.ports has targetPort set to 8081 instead of 8080, preventing frontend from
+  reaching api pods.
+expected_fix: Update Service api spec.ports to set targetPort back to 8080.
+inject:
+- op: patch
+  kind: service
+  name: api
+  patch:
+    spec:
+      ports:
+      - port: 8080
+        targetPort: 8081
+reference_fix:
+- op: patch
+  kind: service
+  name: api
+  patch:
+    spec:
+      ports:
+      - port: 8080
+        targetPort: 8080
+verified: false
+generated_by: google/gemini-3.8-flash
