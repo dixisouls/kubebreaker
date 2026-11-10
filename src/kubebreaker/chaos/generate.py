@@ -47,7 +47,7 @@ Spec format (every field required unless marked optional):
 
 Operations:
   {op: patch, kind: deployment|service|configmap, name: <existing object>,
-   patch: <strategic merge patch>}
+   patch: <strategic merge patch, written as a YAML map, not a string>}
   {op: create, kind: networkpolicy, name: <new name>, spec: <NetworkPolicy spec>}  # inject only
   {op: delete, kind: networkpolicy, name: <one this fault created>}  # reference_fix only
   {op: restart, kind: deployment, name: <deployment>}  # e.g. after a ConfigMap change
@@ -63,6 +63,14 @@ Rules (specs that break them are rejected automatically):
 - Service patches: spec.selector and spec.ports. ConfigMap patches: data.
 - Don't repeat a catalog fault (same object and field).
 - A container list in a strategic merge patch merges by container name.
+
+Lessons from specs that failed their cluster test:
+- Clients keep connections open. A Service port or NetworkPolicy change only breaks new
+  connections, so the old ones keep working and the fault shows up only now and then. After
+  such a change, restart the deployment that makes the calls (e.g. the api).
+- Pick the alert for what users actually see. When the api can't reach a dependency at all,
+  requests fail fast: that's HighErrorRate, not HighLatency. HighLatency fits faults that slow
+  a dependency down without breaking it.
 """
 
 
@@ -72,6 +80,7 @@ class Generation:
     rejected: list[tuple[str, list[str]]] = field(default_factory=list)
     usage: Usage | None = None
     model: str = ""
+    reply: str = ""
 
 
 def app_manifests() -> str:
@@ -142,6 +151,33 @@ def parse_specs(text: str) -> list:
     return data
 
 
+def normalize(spec):
+    """Parse a patch or NetworkPolicy spec the model wrote as a YAML/JSON string into a map.
+    Validation still runs on the result."""
+    if not isinstance(spec, dict):
+        return spec
+    spec = dict(spec)
+    for key in ("inject", "reference_fix"):
+        ops = spec.get(key)
+        if not isinstance(ops, list):
+            continue
+        fixed = []
+        for op in ops:
+            if isinstance(op, dict):
+                op = dict(op)
+                for field_ in ("patch", "spec"):
+                    if isinstance(op.get(field_), str):
+                        try:
+                            parsed = yaml.safe_load(op[field_])
+                        except yaml.YAMLError:
+                            continue
+                        if isinstance(parsed, dict):
+                            op[field_] = parsed
+            fixed.append(op)
+        spec[key] = fixed
+    return spec
+
+
 def generator_client() -> LLMClient:
     model = (
         os.environ.get("GENERATOR_MODEL")
@@ -160,9 +196,12 @@ def generate(
 ) -> Generation:
     llm = llm or generator_client()
     resp = llm.chat(SYSTEM, [Message("user", build_prompt(count, results_dir))], [])
-    out = Generation(usage=resp.usage, model=f"{llm.provider}/{llm.model}")
+    out = Generation(
+        usage=resp.usage, model=f"{llm.provider}/{llm.model}", reply=resp.message.text or ""
+    )
     existing = {p.stem for p in directory.glob("gen-*.yaml")}
-    for spec in parse_specs(resp.message.text or ""):
+    for spec in parse_specs(out.reply):
+        spec = normalize(spec)
         sid = spec.get("id", "?") if isinstance(spec, dict) else "?"
         errors = generated.validate(spec)
         if not errors and sid in existing:

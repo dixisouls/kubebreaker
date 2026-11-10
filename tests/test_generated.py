@@ -254,3 +254,17 @@ def test_prompt_shows_the_app_without_secrets_and_the_weak_faults(tmp_path):
 def test_unparseable_replies_raise():
     with pytest.raises(ValueError, match="list of specs"):
         generate.parse_specs("just some prose")
+
+
+def test_patches_written_as_strings_are_parsed_then_validated(tmp_path):
+    spec = copy.deepcopy(SPEC)
+    spec["id"] = "gen-string-patch"
+    for op in spec["inject"] + spec["reference_fix"]:
+        if "patch" in op:
+            op["patch"] = yaml.safe_dump(op["patch"])
+    out = generate.generate(1, llm=FakeGenerator(yaml.safe_dump([spec])), directory=tmp_path)
+    assert [p.name for p in out.saved] == ["gen-string-patch.yaml"]
+    assert out.reply
+    bad = copy.deepcopy(SPEC)
+    bad["inject"][0]["patch"] = "spec: {template: {spec: {volumes: [{name: h}]}}}"
+    assert generated.validate(generate.normalize(bad))

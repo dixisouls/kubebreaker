@@ -32,6 +32,9 @@ def cmd_generate(args) -> int:
     from kubebreaker.pricing import cost_usd
 
     out = generate.generate(args.count, Path(args.results) if args.results else None)
+    reply_path = Path("runs/generate-last-reply.yaml")
+    reply_path.parent.mkdir(parents=True, exist_ok=True)
+    reply_path.write_text(out.reply)
     cost = cost_usd(out.model.split("/", 1)[1], out.usage) if out.usage else None
     print(
         f"{out.model}: {len(out.saved)} saved, {len(out.rejected)} rejected"
@@ -44,6 +47,7 @@ def cmd_generate(args) -> int:
         print(f"  rejected {sid}")
         for e in errors:
             print(f"           - {e}")
+    print(f"  raw reply in {reply_path}")
     if out.saved:
         print("\nNext: kubebreaker selftest <id> on the cluster marks a fault verified.")
     return 0
