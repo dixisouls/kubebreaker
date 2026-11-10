@@ -151,3 +151,23 @@ def test_resuming_with_another_alert_source_is_refused(tmp_path, monkeypatch):
     assert am.alert_source == "alertmanager"
     with pytest.raises(ValueError, match="paged by hold"):
         am.check_harness_version()
+
+
+def test_a_config_can_run_its_own_faults(tmp_path):
+    from kubebreaker.chaos.combos import COMBOS
+
+    exp = write_exp(
+        tmp_path,
+        """
+name: t
+repeats: 2
+faults: [wrong-db-host]
+configs:
+  - {label: a, provider: openai, model: gpt-6.1-terra}
+  - {label: b, provider: openai, model: gpt-6.1-terra, faults: [multi]}
+""",
+    )
+    jobs = exp.jobs()
+    assert {j.fault_id for j in jobs if j.config.label == "a"} == {"wrong-db-host"}
+    assert {j.fault_id for j in jobs if j.config.label == "b"} == set(COMBOS)
+    assert len(jobs) == 2 * (1 + len(COMBOS))

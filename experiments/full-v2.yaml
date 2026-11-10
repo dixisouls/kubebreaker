@@ -1,0 +1,22 @@
+# Every remaining experiment on harness v2, in one resumable sweep with one cost cap and one
+# report. The 20-step baseline both models are compared against is the core-v2 sweep.
+#   step budget  5, 10 and 30 steps on the 12 catalog faults
+#   multi        two faults at once (chaos/combos.py), 30 steps
+#   memory       postmortem notes kept across the config's episodes (agent/memory.py)
+#   generated    faults Gemini proposed that passed selftest on the cluster
+name: full-v2
+repeats: 3
+faults: all
+configs:
+  - {label: terra-5, provider: openai, model: gpt-6.1-terra, max_steps: 5}
+  - {label: terra-10, provider: openai, model: gpt-6.1-terra, max_steps: 10}
+  - {label: terra-30, provider: openai, model: gpt-6.1-terra, max_steps: 30}
+  - {label: sonnet-5, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 5}
+  - {label: sonnet-10, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 10}
+  - {label: sonnet-30, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 30}
+  - {label: terra-multi, provider: openai, model: gpt-6.1-terra, max_steps: 30, faults: [multi]}
+  - {label: sonnet-multi, provider: anthropic, model: claude-sonnet-5-5, effort: medium, max_steps: 30, faults: [multi]}
+  - {label: terra-memory, provider: openai, model: gpt-6.1-terra, memory: true}
+  - {label: sonnet-memory, provider: anthropic, model: claude-sonnet-5-5, effort: medium, memory: true}
+  - {label: terra-generated, provider: openai, model: gpt-6.1-terra, faults: [generated]}
+  - {label: sonnet-generated, provider: anthropic, model: claude-sonnet-5-5, effort: medium, faults: [generated]}

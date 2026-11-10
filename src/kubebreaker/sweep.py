@@ -60,6 +60,8 @@ class Config:
     effort: str = ""
     # Keep postmortem notes (agent/memory.py) across this config's episodes
     memory: bool = False
+    # Faults for this config only (resolved ids); empty means the experiment's faults
+    faults: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,7 @@ class Experiment:
             Job(c, f, r)
             for r in range(1, self.repeats + 1)
             for c in self.configs
-            for f in self.fault_ids
+            for f in (c.faults or self.fault_ids)
         ]
 
     def pending(self) -> list[Job]:
@@ -151,7 +153,14 @@ def resolve_faults(spec) -> list[str]:
 def load(path: str | Path, name: str | None = None) -> Experiment:
     """Read an experiment file. `name` overrides its name, which picks the results folder."""
     data = yaml.safe_load(Path(path).read_text())
-    configs = [Config(**c) for c in data["configs"]]
+    configs = []
+    for c in data["configs"]:
+        c = dict(c)
+        if "faults" in c:
+            c["faults"] = tuple(resolve_faults(c["faults"]))
+            if not c["faults"]:
+                raise ValueError(f"config {c.get('label')!r} has no faults")
+        configs.append(Config(**c))
     labels = [c.label for c in configs]
     if len(set(labels)) != len(labels):
         raise ValueError("config labels must be unique")
@@ -246,11 +255,12 @@ def estimate_job(job: Job, history: History) -> Estimate:
 
 def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[str, float]:
     """A printable plan with cost and time per config, and the total estimated cost."""
-    lines = [f"experiment: {exp.name}  ({len(exp.fault_ids)} faults x {exp.repeats} repeats)"]
+    faults = {f for c in exp.configs for f in (c.faults or exp.fault_ids)}
+    lines = [f"experiment: {exp.name}  ({len(faults)} faults x {exp.repeats} repeats)"]
     if exp.alert_source != "hold":
         lines[0] += f"  paged by {exp.alert_source}"
     header = (
-        f"  {'config':<14}{'model':<20}{'steps':>6}{'effort':>8}{'jobs':>6}"
+        f"  {'config':<18}{'model':<20}{'steps':>6}{'effort':>8}{'jobs':>6}"
         f"{'est. cost':>11}{'est. time':>11}  basis"
     )
     lines.append(header)
@@ -268,12 +278,12 @@ def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[
         if not all(e.priced for e in ests):
             unpriced.add(c.model)
         lines.append(
-            f"  {c.label:<14}{c.model:<20}{c.max_steps:>6}{c.effort or '-':>8}{len(mine):>6}"
+            f"  {c.label:<18}{c.model:<20}{c.max_steps:>6}{c.effort or '-':>8}{len(mine):>6}"
             f"{'$' + format(cost, '.2f'):>11}{secs / 3600:>10.1f}h  {_basis(history, c.model)}"
         )
     judge = len(jobs) * judge_cost_estimate()
     lines.append(
-        f"  {'judge':<14}{'':<20}{'':>6}{'':>8}{len(jobs):>6}{'$' + format(judge, '.2f'):>11}"
+        f"  {'judge':<18}{'':<20}{'':>6}{'':>8}{len(jobs):>6}{'$' + format(judge, '.2f'):>11}"
     )
     total_cost += judge
     lines.append(
