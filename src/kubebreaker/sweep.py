@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 
 from kubebreaker import HARNESS_VERSION
-from kubebreaker.chaos import CATALOG, Tier, runner
+from kubebreaker.chaos import CATALOG, Tier, alerting, runner
 from kubebreaker.episode import RUNS_DIR
 from kubebreaker.llm import Usage
 from kubebreaker.pricing import PRICES, cost_usd
@@ -76,6 +76,8 @@ class Experiment:
     repeats: int
     fault_ids: list[str]
     configs: list[Config]
+    # How episodes page the agent (chaos/alerting.py); fixed for the whole experiment
+    alert_source: str = "hold"
 
     def jobs(self) -> list[Job]:
         # Repeat-major order: one full pass over everything before the second repeat, so a
@@ -91,17 +93,26 @@ class Experiment:
         return [j for j in self.jobs() if not (j.run_dir(self.name) / "result.json").exists()]
 
     def check_harness_version(self) -> None:
-        """Refuse to resume into a sweep holding results from another harness version:
-        they'd be skipped as done and mixed with new ones in the same comparison."""
-        found = set()
+        """Refuse to resume into a sweep holding results from another harness version or
+        alert source: they'd be skipped as done and mixed with new ones in one comparison."""
+        versions, sources = set(), set()
         for f in (RUNS_DIR / "sweeps" / self.name).glob("*/*/r*/result.json"):
-            found.add(json.loads(f.read_text()).get("harness_version", 1))
-        old = sorted(v for v in found if v != HARNESS_VERSION)
+            r = json.loads(f.read_text())
+            versions.add(r.get("harness_version", 1))
+            sources.add(r.get("alert_source", "hold"))
+        hint = "Use --name to write this run to a new sweep folder."
+        old = sorted(v for v in versions if v != HARNESS_VERSION)
         if old:
-            versions = ", ".join(f"v{v}" for v in old)
+            found = ", ".join(f"v{v}" for v in old)
             raise ValueError(
-                f"runs/sweeps/{self.name} has results from harness {versions}, and this is "
-                f"v{HARNESS_VERSION}. Use --name to write this run to a new sweep folder."
+                f"runs/sweeps/{self.name} has results from harness {found}, and this is "
+                f"v{HARNESS_VERSION}. {hint}"
+            )
+        other = sorted(sources - {self.alert_source})
+        if other:
+            raise ValueError(
+                f"runs/sweeps/{self.name} has results paged by {', '.join(other)}, and this "
+                f"run uses {self.alert_source}. {hint}"
             )
 
 
@@ -132,6 +143,7 @@ def load(path: str | Path, name: str | None = None) -> Experiment:
         repeats=int(data.get("repeats", 1)),
         fault_ids=resolve_faults(data.get("faults", "all")),
         configs=configs,
+        alert_source=alerting.alert_source(data.get("alert_source")),
     )
 
 
@@ -213,6 +225,8 @@ def estimate_job(job: Job, history: History) -> Estimate:
 def summarize_plan(exp: Experiment, jobs: list[Job], history: History) -> tuple[str, float]:
     """A printable plan with cost and time per config, and the total estimated cost."""
     lines = [f"experiment: {exp.name}  ({len(exp.fault_ids)} faults x {exp.repeats} repeats)"]
+    if exp.alert_source != "hold":
+        lines[0] += f"  paged by {exp.alert_source}"
     header = (
         f"  {'config':<14}{'model':<20}{'steps':>6}{'effort':>8}{'jobs':>6}"
         f"{'est. cost':>11}{'est. time':>11}  basis"
@@ -300,7 +314,14 @@ def run_sweep(exp: Experiment, max_cost: float | None = None, log=print) -> list
         log(f"[{i}/{len(jobs)}] {c.label} {job.fault_id} r{job.repeat} ...")
         try:
             llm = make_client(c.provider, c.model, effort=c.effort or None)
-            r = run_episode(admin, CATALOG[job.fault_id], llm, c.max_steps, run_dir=run_dir)
+            r = run_episode(
+                admin,
+                CATALOG[job.fault_id],
+                llm,
+                c.max_steps,
+                run_dir=run_dir,
+                alert_source=exp.alert_source,
+            )
         except EpisodeAborted as exc:
             spent += exc.cost_usd
             failures[c.provider] = failures.get(c.provider, 0) + 1

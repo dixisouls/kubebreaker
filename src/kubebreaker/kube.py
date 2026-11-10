@@ -76,17 +76,24 @@ class Kube:
         selector = ",".join(f"{k}={v}" for k, v in dep.spec.selector.match_labels.items())
         return self.core.list_namespaced_pod(self.namespace, label_selector=selector).items
 
-    def prom_query(self, promql: str) -> list[dict]:
-        """Instant PromQL query through the API server's service proxy. Returns the result list."""
+    def service_get(
+        self, service: str, path: str, params: list[tuple[str, str]] | None = None
+    ) -> object:
+        """GET a JSON endpoint of a service in `monitoring` through the API server proxy,
+        e.g. service_get("prometheus:9090", "/api/v1/query", [("query", "up")])."""
         request = self.api_client.param_serialize(
             "GET",
-            "/api/v1/namespaces/monitoring/services/prometheus:9090/proxy/api/v1/query",
-            query_params=[("query", promql)],
+            f"/api/v1/namespaces/monitoring/services/{service}/proxy{path}",
+            query_params=params or [],
             auth_settings=["BearerToken"],
         )
         resp = self.api_client.call_api(*request, _request_timeout=15)
         resp.read()
-        body = json.loads(resp.data)
+        return json.loads(resp.data)
+
+    def prom_query(self, promql: str) -> list[dict]:
+        """Instant PromQL query through the API server's service proxy. Returns the result list."""
+        body = self.service_get("prometheus:9090", "/api/v1/query", [("query", promql)])
         if body.get("status") != "success":
             raise RuntimeError(f"prometheus: {body.get('error')}")
         return body["data"]["result"]

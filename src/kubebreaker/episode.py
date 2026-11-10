@@ -3,7 +3,7 @@
 import json
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kubebreaker import HARNESS_VERSION
@@ -11,7 +11,7 @@ from kubebreaker.agent.identity import agent_kube
 from kubebreaker.agent.loop import run_agent
 from kubebreaker.agent.tools import AgentTools
 from kubebreaker.agent.trace import Trace
-from kubebreaker.chaos import Fault, runner
+from kubebreaker.chaos import Fault, alerting, runner
 from kubebreaker.kube import Kube
 from kubebreaker.llm import LLMClient
 from kubebreaker.pricing import cost_usd
@@ -74,6 +74,10 @@ class EpisodeResult:
     alert_hold_seconds: int = 0
     # kubebreaker.HARNESS_VERSION the episode ran under (1 for results without this field)
     harness_version: int = 1
+    # How the agent was paged: "hold" (symptom poll) or "alertmanager" (see chaos/alerting.py)
+    alert_source: str = "hold"
+    # The alert text the agent received
+    alert: str = ""
     error: str = ""
     run_dir: str = ""
 
@@ -101,6 +105,28 @@ def _abort(run_dir: Path, trace: Trace, stage: str, error: str, cost: float) -> 
     return EpisodeAborted(f"{stage} API call failed: {error}", cost)
 
 
+def page_from_alertmanager(admin: Kube, fault: Fault, trace: Trace) -> str:
+    """Inject the fault, wait for its alerts to fire in Alertmanager, return their text."""
+    names = alerting.alert_names(fault.alert)
+    cleared = alerting.wait_clear(admin, names)
+    # wait_clear guarantees nothing was firing at injection, so the slack only absorbs clock
+    # drift between this machine and the cluster
+    since = alerting.now() - timedelta(seconds=30)
+    start = time.monotonic()
+    symptom_s = runner.inject(admin, fault)
+    fired = alerting.wait_firing(admin, names, since)
+    trace.log(
+        "injected",
+        fault=fault.id,
+        symptom_seconds=round(symptom_s, 1),
+        alert_source="alertmanager",
+        alerts=names,
+        waited_for_clear=round(cleared, 1),
+        fired_after=round(time.monotonic() - start, 1),
+    )
+    return alerting.alert_text(fired)
+
+
 def new_run_dir(fault_id: str) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return RUNS_DIR / f"{stamp}-{fault_id}"
@@ -113,6 +139,7 @@ def run_episode(
     max_steps: int = 20,
     max_tokens: int = 600_000,
     run_dir: Path | None = None,
+    alert_source: str | None = None,
 ) -> EpisodeResult:
     run_dir = run_dir or new_run_dir(fault.id)
     trace_path = run_dir / "trace.jsonl"
@@ -125,13 +152,18 @@ def run_episode(
     trace.log("reset")
     runner.reset_app(admin)
     baseline = take_snapshot(admin)
-    hold = runner.alert_hold_seconds()
-    symptom_s = runner.inject(admin, fault, hold=hold)
-    trace.log("injected", fault=fault.id, symptom_seconds=round(symptom_s, 1), alert_hold=hold)
+    source = alerting.alert_source(alert_source)
+    if source == "alertmanager":
+        alert, hold = page_from_alertmanager(admin, fault, trace), 0
+    else:
+        hold = runner.alert_hold_seconds()
+        symptom_s = runner.inject(admin, fault, hold=hold)
+        trace.log("injected", fault=fault.id, symptom_seconds=round(symptom_s, 1), alert_hold=hold)
+        alert = fault.alert
 
     tools = AgentTools(agent_kube(admin))
     alert_at = time.monotonic()
-    outcome = run_agent(llm, tools, fault.alert, trace, max_steps, max_tokens)
+    outcome = run_agent(llm, tools, alert, trace, max_steps, max_tokens)
     agent_cost = cost_usd(llm.model, outcome.usage) or 0.0
     if outcome.stop_reason == "llm_error":
         raise _abort(run_dir, trace, "agent", outcome.error, agent_cost)
@@ -194,6 +226,8 @@ def run_episode(
         max_steps=max_steps,
         alert_hold_seconds=hold,
         harness_version=HARNESS_VERSION,
+        alert_source=source,
+        alert=alert,
         effort=getattr(llm, "effort", None) or getattr(llm, "reasoning_effort", None) or "",
         fallback_turns=outcome.fallback_turns,
         served_by=outcome.served_by,

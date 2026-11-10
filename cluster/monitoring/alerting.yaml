@@ -1,0 +1,146 @@
+# Alerting for kubebreaker: Prometheus rules plus Alertmanager.
+# With ALERT_SOURCE=alertmanager (or `alert_source: alertmanager` in an experiment file), the
+# harness pages the agent only once Alertmanager reports the fault's alert firing, and the
+# agent gets the alert text from the rule's description. The default ("hold") polls the
+# fault's symptom instead and doesn't need any of this.
+#
+# Each rule's name matches the prefix of the fault alerts in the catalog
+# (e.g. "HighErrorRate: ..."), so the harness knows which alert a fault should raise.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+data:
+  shop.yml: |
+    groups:
+      - name: shop
+        rules:
+          - alert: HighErrorRate
+            expr: |
+              sum(rate(http_requests_total{namespace="shop",service="frontend",status=~"5.."}[1m]))
+                / sum(rate(http_requests_total{namespace="shop",service="frontend"}[1m]))
+                > 0.5
+            for: 45s
+            labels:
+              severity: page
+            annotations:
+              description: the shop frontend is returning 5xx errors for most requests.
+
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(http_request_duration_seconds_bucket{namespace="shop",service="frontend"}[1m]))
+              ) > 0.1
+            for: 45s
+            labels:
+              severity: page
+            annotations:
+              description: >-
+                shop frontend p95 latency is {{ $value | humanizeDuration }},
+                above 100ms (normally about 20ms).
+
+          - alert: KubePodCrashLooping
+            expr: |
+              max by (namespace, deployment) (
+                label_replace(
+                  kube_pod_container_status_waiting_reason{namespace="shop",reason="CrashLoopBackOff"},
+                  "deployment", "$1", "pod", "(.+)-[a-z0-9]+-[a-z0-9]+"
+                )
+              ) > 0
+            for: 45s
+            labels:
+              severity: page
+            annotations:
+              description: >-
+                pods of deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                are restarting repeatedly.
+
+          - alert: KubeDeploymentRolloutStuck
+            expr: |
+              max by (namespace, deployment) (
+                kube_deployment_spec_replicas{namespace="shop"}
+                  > kube_deployment_status_replicas_updated{namespace="shop"}
+                or
+                kube_deployment_spec_replicas{namespace="shop"}
+                  > kube_deployment_status_replicas_available{namespace="shop"}
+              )
+            for: 45s
+            labels:
+              severity: page
+            annotations:
+              description: >-
+                deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has not finished rolling out.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    # Nobody gets notified: the harness reads alerts from the API.
+    route:
+      receiver: harness
+      group_by: [alertname, deployment]
+    receivers:
+      - name: harness
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: quay.io/prometheus/alertmanager:v0.34.1
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=
+          ports:
+            - containerPort: 9093
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9093
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: data
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - port: 9093
+      targetPort: 9093

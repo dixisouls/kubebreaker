@@ -94,7 +94,7 @@ def test_sweep_skips_a_provider_after_repeated_api_failures(tmp_path, monkeypatc
     )
     calls = []
 
-    def always_aborts(admin, fault, llm, max_steps, run_dir):
+    def always_aborts(admin, fault, llm, max_steps, run_dir, **kwargs):
         calls.append(fault.id)
         raise episode.EpisodeAborted("no credits", 0.0)
 

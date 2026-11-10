@@ -140,3 +140,14 @@ def test_name_override_picks_a_new_results_folder(tmp_path, monkeypatch):
     new = sweep.load(p, name="t-v2")
     new.check_harness_version()
     assert new.name == "t-v2" and len(new.pending()) == len(new.jobs())
+
+
+def test_resuming_with_another_alert_source_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(sweep, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.delenv("ALERT_SOURCE", raising=False)
+    exp = write_exp(tmp_path, EXP)
+    _result(exp, exp.jobs()[0], sweep.HARNESS_VERSION)  # no alert_source: hold
+    am = write_exp(tmp_path, EXP + "alert_source: alertmanager\n")
+    assert am.alert_source == "alertmanager"
+    with pytest.raises(ValueError, match="paged by hold"):
+        am.check_harness_version()

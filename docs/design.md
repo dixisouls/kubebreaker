@@ -72,6 +72,8 @@ Faults that change a pod template cause a **partial outage**: the rolling update
 
 The agent is alerted only after the fault's symptom has held without a break for `ALERT_HOLD_SECONDS` (default 45s), like the `for:` clause on a Prometheus alerting rule. Without the hold, the alert fired about 20 seconds after a reset, before Prometheus had collected enough samples: in the first core sweep, error-rate queries returned "no data" and one agent concluded a NetworkPolicy outage was "a startup blip". Every result records `alert_hold_seconds`; the first core sweep ran with 0, so compare only runs with the same value. Selftests skip the hold.
 
+**Alertmanager paging** (opt-in: `alert_source: alertmanager` in an experiment file, `--alert-source alertmanager` on `run`, or `ALERT_SOURCE`). `cluster/monitoring/alerting.yaml` defines four Prometheus rules, one per alert name the catalog uses (`HighErrorRate`, `HighLatency`, `KubePodCrashLooping`, `KubeDeploymentRolloutStuck`), each with `for: 45s`, plus an Alertmanager with no receivers. The harness waits until none of the fault's alerts is firing, injects the fault, waits for Alertmanager to report every alert named in the fault's alert text with a start time after injection, and sends the agent the rules' descriptions. Results record `alert_source` and the exact `alert` text, and a sweep won't mix alert sources in one folder. Apply the rules to an existing cluster with `make alerting`.
+
 ## Runtime layout
 
 - `kind` and `kubectl` run on the host. kind is never run inside a container.
