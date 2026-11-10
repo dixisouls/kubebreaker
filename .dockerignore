@@ -1,0 +1,15 @@
+# Never bake secrets or results into the image
+.env
+.env.*
+runs/
+.git/
+.venv/
+**/__pycache__/
+.claude/
+.code-review-graph/
+# Not needed by the harness
+app/src/
+app/Dockerfile
+app/requirements*
+docs/
+tests/
