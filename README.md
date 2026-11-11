@@ -6,6 +6,8 @@ kubebreaker breaks a local Kubernetes cluster in a known way, pages an LLM agent
 
 It runs on a laptop. The [results](#results) below come from 468 incidents across 16 configurations.
 
+**Write-up:** [Fixed, Never Declared: Evaluating LLM On-Call Agents on Kubernetes](https://divya-panchal.hashnode.dev/fixed-never-declared-evaluating-llm-on-call-agents-on-kubernetes), the full study with figures, a per-fault breakdown and failure analysis.
+
 ## What an episode looks like
 
 Claude Sonnet 5.5 on `redis-oom`, where the Redis cache refuses writes and the error surfaces two services away, at the frontend. Condensed from `trace.jsonl`:
@@ -70,6 +72,8 @@ In the hard tier the symptom always shows up somewhere other than the cause. Eve
 ## Results
 
 The full v2 study, [`experiments/full-v2.yaml`](experiments/full-v2.yaml), ran 468 incidents across 16 configurations, each three times. The agents are GPT-6.1 Terra and Claude Sonnet 5.5 (medium effort). Gemini 3.8 Flash, a third provider, judged every root cause. An incident counts as **solved** when the app recovers *and* the judge grades the stated root cause correct. The best value in each row is bold.
+
+The [write-up](https://divya-panchal.hashnode.dev/fixed-never-declared-evaluating-llm-on-call-agents-on-kubernetes) covers these results in more depth, including token usage and how many steps agents spent after their final fix.
 
 | Category | Measure | Notes | GPT-6.1 Terra | Claude Sonnet 5.5 |
 | --- | --- | --- | ---: | ---: |
