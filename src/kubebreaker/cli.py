@@ -91,6 +91,21 @@ def cmd_verify(args) -> int:
     return 0
 
 
+def _alert_selftest(k: Kube, faults) -> int:
+    failed = 0
+    for fault in faults:
+        r = runner.alert_selftest(k, fault)
+        status = "PASS" if r.ok else "FAIL"
+        detail = f"fired after {r.fired_seconds:5.1f}s" if r.ok else r.error
+        print(f"{status}  {fault.id:<36} {detail}", flush=True)
+        for line in r.text.splitlines():
+            print(f"        {line}")
+        failed += not r.ok
+    runner.reset_app(k)
+    print(f"\n{len(faults) - failed}/{len(faults)} faults raise their alerts in Alertmanager")
+    return 1 if failed else 0
+
+
 def cmd_selftest(args) -> int:
     k = Kube.from_env()
     from kubebreaker.chaos import generated
@@ -99,6 +114,8 @@ def cmd_selftest(args) -> int:
     # "multi" expands to every two-fault combination
     ids = [c for i in ids for c in (COMBOS if i == "multi" else [i])]
     faults = [_fault(i) for i in ids]
+    if args.alerts:
+        return _alert_selftest(k, faults)
     failed = 0
     for fault in faults:
         r = runner.selftest(k, fault)
@@ -254,6 +271,11 @@ def main() -> None:
 
     p = sub.add_parser("selftest", help="inject each fault, apply its reference fix, verify")
     p.add_argument("faults", nargs="*", help="fault ids (default: all)")
+    p.add_argument(
+        "--alerts",
+        action="store_true",
+        help="instead check that each fault's alerts fire in Alertmanager (needs make alerting)",
+    )
     p.set_defaults(func=cmd_selftest)
 
     p = sub.add_parser("run", help="run one agent episode against a fault")

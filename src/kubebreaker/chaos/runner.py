@@ -1,5 +1,6 @@
 """Run faults: reset the app, inject, wait for the symptom, verify recovery."""
 
+import contextlib
 import os
 import subprocess
 import time
@@ -123,3 +124,36 @@ def selftest(k: Kube, fault: Fault) -> SelftestResult:
         return SelftestResult(fault.id, True, symptom_s, recover_s)
     except Exception as exc:
         return SelftestResult(fault.id, False, error=f"{type(exc).__name__}: {exc}")
+
+
+@dataclass
+class AlertCheck:
+    fault_id: str
+    ok: bool
+    fired_seconds: float = 0.0
+    text: str = ""
+    error: str = ""
+
+
+def alert_selftest(k: Kube, fault: Fault) -> AlertCheck:
+    """Check that injecting the fault makes its alerts fire in Alertmanager, as an episode
+    with alert_source alertmanager needs. Leaves the app reset."""
+    from datetime import timedelta
+
+    from kubebreaker.chaos import alerting
+
+    names = alerting.alert_names(fault.alert)
+    try:
+        reset_app(k)
+        alerting.wait_clear(k, names)
+        since = alerting.now() - timedelta(seconds=30)
+        start = time.monotonic()
+        inject(k, fault)
+        fired = alerting.wait_firing(k, names, since)
+        return AlertCheck(fault.id, True, time.monotonic() - start, alerting.alert_text(fired))
+    except Exception as exc:
+        return AlertCheck(fault.id, False, error=f"{type(exc).__name__}: {exc}")
+    finally:
+        # Best effort: the next check resets the app anyway
+        with contextlib.suppress(Exception):
+            fault.reference_fix(k)
